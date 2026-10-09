@@ -213,4 +213,20 @@ with tab_tabla:
 
     if "Visitas Efectivas" in df_concentrado.columns:
       m3.metric(
-          "Visitas Efectivas", int(df_concent
+          "Visitas Efectivas", int(df_concentrado["Visitas Efectivas"].sum())
+      )
+
+    if "Visitas Servidores de la Salud" in df_concentrado.columns:
+      m4.metric(
+          "Visitas Serv. Salud",
+          int(df_concentrado["Visitas Servidores de la Salud"].sum()),
+      )
+
+    st.markdown("---")
+    csv = df_concentrado.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="📥 Descargar Copia en Excel / CSV",
+        data=csv,
+        file_name="CONCENTRADO_DE_REPORTES_DIARIOS.csv",
+        mime="text/csv",
+    )

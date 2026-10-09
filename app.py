@@ -13,28 +13,21 @@ st.write(
     "Sistema conectado en tiempo real con Google Sheets (**TERRITORIO**)."
 )
 
+# URLs de Google Sheets
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1StjBMVIkueBy9sVy5dNh1ylpG5he-51iCYeeaj_mixM/edit"
-PUBLISHED_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQq16I0eaHC0-Mf4hxWnQFIHdxIO11u5CtDmcDGTJ2UZGgv6YhM-x8RJhW31n6dSKBnFEQO9doPoD1y/pub?output=csv"
+# Enlace publicado especificando el GID de la pestaña PERSONAL_DE_BIENESTAR (gid=700313474)
+PUBLISHED_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQq16I0eaHC0-Mf4hxWnQFIHdxIO11u5CtDmcDGTJ2UZGgv6YhM-x8RJhW31n6dSKBnFEQO9doPoD1y/pub?gid=700313474&single=true&output=csv"
 
+# Conexión con Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 
+# ---------------------------------------------------------
+# 1. Cargar nombres del Personal de Bienestar
+# ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def cargar_personal():
-  try:
-    df_publico = pd.read_csv(PUBLISHED_CSV_URL)
-    if df_publico.shape[1] >= 2:
-      col_nombres = df_publico.iloc[:, 1]
-    else:
-      col_nombres = df_publico.iloc[:, 0]
-    nombres = sorted(
-        col_nombres.dropna().astype(str).str.strip().unique().tolist()
-    )
-    if len(nombres) > 0:
-      return nombres
-  except Exception:
-    pass
-
+  # Intento 1: Leer directamente la pestaña PERSONAL_DE_BIENESTAR por API
   try:
     df_personal = conn.read(
         spreadsheet=SPREADSHEET_URL,
@@ -45,14 +38,58 @@ def cargar_personal():
       col_nombres = df_personal.iloc[:, 1]
     else:
       col_nombres = df_personal.iloc[:, 0]
+
     nombres = sorted(
         col_nombres.dropna().astype(str).str.strip().unique().tolist()
     )
+    nombres = [
+        n
+        for n in nombres
+        if n
+        not in [
+            "PERIODICOS ENTREGADOS",
+            "VISITAS EFECTIVAS",
+            "VISITAS SERVIDORES DE LA SALUD",
+            "0",
+            "nan",
+            "Personal de Bienestar",
+        ]
+    ]
     if len(nombres) > 0:
       return nombres
   except Exception:
     pass
 
+  # Intento 2: CSV publicado especificando la pestaña de personal (gid=700313474)
+  try:
+    df_publico = pd.read_csv(PUBLISHED_CSV_URL)
+    if df_publico.shape[1] >= 2:
+      col_nombres = df_publico.iloc[:, 1]
+    else:
+      col_nombres = df_publico.iloc[:, 0]
+
+    nombres = sorted(
+        col_nombres.dropna().astype(str).str.strip().unique().tolist()
+    )
+    nombres = [
+        n
+        for n in nombres
+        if n
+        not in [
+            "PERIODICOS ENTREGADOS",
+            "VISITAS EFECTIVAS",
+            "VISITAS SERVIDORES DE LA SALUD",
+            "0",
+            "nan",
+            "Personal de Bienestar",
+        ]
+    ]
+    if len(nombres) > 0:
+      return nombres
+  except Exception:
+    pass
+
+  # Intento 3: Lista base de respaldo integrada
   return [
       "GRANADOS ROBLES AARON MOISES",
       "ROJAS SANTIAGO ALAN",
@@ -82,6 +119,9 @@ def cargar_personal():
 
 lista_personal = cargar_personal()
 
+# ---------------------------------------------------------
+# 2. Cargar Concentrado de Reportes
+# ---------------------------------------------------------
 try:
   df_concentrado = conn.read(
       spreadsheet=SPREADSHEET_URL,
@@ -101,12 +141,20 @@ except Exception:
       ]
   )
 
+# ---------------------------------------------------------
+# Pestañas de la aplicación
+# ---------------------------------------------------------
 tab_form, tab_tabla = st.tabs(["📝 Capturar Reporte", "📋 Concentrado General"])
 
+# ---------------------------------------------------------
+# TAB 1: FORMULARIO DE CAPTURA
+# ---------------------------------------------------------
 with tab_form:
   st.subheader("Ingreso de Datos Diarios")
+
   with st.form("form_territorio", clear_on_submit=True):
     col_a, col_b = st.columns(2)
+
     with col_a:
       fecha = st.date_input("Fecha de captura", value=date.today())
       personal = st.selectbox("Personal de Bienestar", options=lista_personal)
@@ -116,6 +164,7 @@ with tab_form:
       periodicos_entregados = st.number_input(
           "2. Periódicos Entregados", min_value=0, step=1, value=0
       )
+
     with col_b:
       visitas_efectivas = st.number_input(
           "3. Visitas Efectivas", min_value=0, step=1, value=0
@@ -165,14 +214,20 @@ with tab_form:
         except Exception as ex:
           st.error(f"Error al guardar en Google Sheets: {ex}")
 
+# ---------------------------------------------------------
+# TAB 2: CONCENTRADO GENERAL Y TOTALES
+# ---------------------------------------------------------
 with tab_tabla:
   st.subheader("📋 Concentrado General en Tiempo Real")
+
   if df_concentrado.empty:
     st.info("Aún no se han registrado reportes en el concentrado.")
   else:
     st.dataframe(df_concentrado, use_container_width=True)
+
     st.markdown("---")
     st.markdown("### 📈 Totales Acumulados Globales")
+
     cols_m = [
         "Visitas Realizadas",
         "Periódicos Entregados",
@@ -184,25 +239,31 @@ with tab_tabla:
         df_concentrado[col] = pd.to_numeric(
             df_concentrado[col], errors="coerce"
         ).fillna(0)
+
     m1, m2, m3, m4 = st.columns(4)
+
     if "Visitas Realizadas" in df_concentrado.columns:
       m1.metric(
           "Visitas Realizadas", int(df_concentrado["Visitas Realizadas"].sum())
       )
+
     if "Periódicos Entregados" in df_concentrado.columns:
       m2.metric(
           "Periódicos Entregados",
           int(df_concentrado["Periódicos Entregados"].sum()),
       )
+
     if "Visitas Efectivas" in df_concentrado.columns:
       m3.metric(
           "Visitas Efectivas", int(df_concentrado["Visitas Efectivas"].sum())
       )
+
     if "Visitas Servidores de la Salud" in df_concentrado.columns:
       m4.metric(
           "Visitas Serv. Salud",
           int(df_concentrado["Visitas Servidores de la Salud"].sum()),
       )
+
     st.markdown("---")
     csv = df_concentrado.to_csv(index=False).encode("utf-8")
     st.download_button(

@@ -43,18 +43,9 @@ def cargar_personal():
     nombres = sorted(
         col_nombres.dropna().astype(str).str.strip().unique().tolist()
     )
+    # Se aceptan todos los nombres/registros sin filtrar el '0'
     nombres = [
-        n
-        for n in nombres
-        if n
-        not in [
-            "PERIODICOS ENTREGADOS",
-            "VISITAS EFECTIVAS",
-            "VISITAS SERVIDORES DE LA SALUD",
-            "0",
-            "nan",
-            "Personal de Bienestar",
-        ]
+        n for n in nombres if n and n not in ["nan", "Personal de Bienestar"]
     ]
     if len(nombres) > 0:
       return nombres
@@ -116,7 +107,7 @@ with tab_form:
     col_a, col_b = st.columns(2)
 
     with col_a:
-      # Fecha bloqueada (disabled=True) para que solo puedan visualizarla sin editarla
+      # Fecha bloqueada para visualización únicamente
       fecha = st.date_input(
           "Fecha de captura", value=date.today(), disabled=True
       )
@@ -146,13 +137,12 @@ with tab_form:
     if guardar:
       fecha_str = fecha.strftime("%Y-%m-%d")
 
-      # Validación 1: Selección de personal
       if not personal or personal == "Seleccionar...":
         st.error(
             "Por favor selecciona un miembro válido del Personal de Bienestar."
         )
       else:
-        # Validación 2: Verificar si ya existe un registro para la misma persona y fecha
+        # Validación de registro único diario
         ya_registrado = False
         if (
             not df_concentrado.empty
@@ -209,7 +199,6 @@ with tab_form:
 with tab_tabla:
   st.subheader("📊 Estadísticas y Acumulados")
 
-  # Campo para contraseña de protección
   password = st.text_input(
       "🔒 Ingrese la contraseña de acceso para ver las estadísticas:",
       type="password",
@@ -221,7 +210,6 @@ with tab_tabla:
     if df_concentrado.empty:
       st.info("Aún no se han registrado reportes en el concentrado.")
     else:
-      # Convertir columnas cuantitativas a valores numéricos
       cols_m = [
           "Visitas Realizadas",
           "Periódicos Entregados",
@@ -234,7 +222,6 @@ with tab_tabla:
               df_concentrado[col], errors="coerce"
           ).fillna(0)
 
-      # 1. Totales Acumulados Globales
       st.markdown("### 📈 Totales Acumulados Globales")
       m1, m2, m3, m4 = st.columns(4)
 
@@ -263,7 +250,6 @@ with tab_tabla:
 
       st.markdown("---")
 
-      # 2. Estadísticas Desglosadas por Día
       st.markdown("### 📅 Estadísticas Desglosadas por Día")
 
       if "Fecha" in df_concentrado.columns:
@@ -282,7 +268,6 @@ with tab_tabla:
 
       st.markdown("---")
 
-      # 3. Descarga de Copia en CSV
       csv = df_concentrado.to_csv(index=False).encode("utf-8")
       st.download_button(
           label="📥 Descargar Copia en Excel / CSV",

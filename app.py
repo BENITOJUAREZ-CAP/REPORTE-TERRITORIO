@@ -15,22 +15,20 @@ st.write(
 
 # URLs de Google Sheets
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1StjBMVIkueBy9sVy5dNh1ylpG5he-51iCYeeaj_mixM/edit"
-# Enlace publicado especificando el GID de la pestaña PERSONAL_DE_BIENESTAR (gid=700313474)
 PUBLISHED_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQq16I0eaHC0-Mf4hxWnQFIHdxIO11u5CtDmcDGTJ2UZGgv6YhM-x8RJhW31n6dSKBnFEQO9doPoD1y/pub?gid=700313474&single=true&output=csv"
 
-# Conexión con Google Sheets
+# Inicializar conexión con Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 
 # ---------------------------------------------------------
-# 1. Cargar nombres del Personal de Bienestar
+# 1. Cargar catálogo del Personal de Bienestar
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def cargar_personal():
-  # Intento 1: Leer directamente la pestaña PERSONAL_DE_BIENESTAR por API
+  # Intento 1: Vía API oficial de la Cuenta de Servicio
   try:
     df_personal = conn.read(
-        spreadsheet=SPREADSHEET_URL,
         worksheet="PERSONAL_DE_BIENESTAR",
         ttl="1m",
     )
@@ -60,7 +58,7 @@ def cargar_personal():
   except Exception:
     pass
 
-  # Intento 2: CSV publicado especificando la pestaña de personal (gid=700313474)
+  # Intento 2: Vía enlace CSV publicado en la web
   try:
     df_publico = pd.read_csv(PUBLISHED_CSV_URL)
     if df_publico.shape[1] >= 2:
@@ -89,7 +87,7 @@ def cargar_personal():
   except Exception:
     pass
 
-  # Intento 3: Lista base de respaldo integrada
+  # Intento 3: Lista de respaldo
   return [
       "GRANADOS ROBLES AARON MOISES",
       "ROJAS SANTIAGO ALAN",
@@ -124,7 +122,6 @@ lista_personal = cargar_personal()
 # ---------------------------------------------------------
 try:
   df_concentrado = conn.read(
-      spreadsheet=SPREADSHEET_URL,
       worksheet="CONCENTRADO_DE_REPORTES_DIARIOS",
       ttl="0s",
   )
@@ -202,7 +199,6 @@ with tab_form:
 
         try:
           conn.update(
-              spreadsheet=SPREADSHEET_URL,
               worksheet="CONCENTRADO_DE_REPORTES_DIARIOS",
               data=df_actualizado,
           )

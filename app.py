@@ -178,4 +178,94 @@ with tab_form:
 # TAB 2: ESTADÍSTICAS Y ACUMULADOS
 # ---------------------------------------------------------
 with tab_tabla:
-  st.subheader("📊 Estadísticas y
+  st.subheader("📊 Estadísticas y Acumulados")
+
+  # Campo para contraseña de protección
+  password = st.text_input(
+      "🔒 Ingrese la contraseña de acceso para ver las estadísticas:",
+      type="password",
+  )
+
+  if password == "Monica.1":
+    st.success("🔓 Acceso concedido.")
+
+    if df_concentrado.empty:
+      st.info("Aún no se han registrado reportes en el concentrado.")
+    else:
+      # Convertir columnas cuantitativas a valores numéricos
+      cols_m = [
+          "Visitas Realizadas",
+          "Periódicos Entregados",
+          "Visitas Efectivas",
+          "Visitas Servidores de la Salud",
+      ]
+      for col in cols_m:
+        if col in df_concentrado.columns:
+          df_concentrado[col] = pd.to_numeric(
+              df_concentrado[col], errors="coerce"
+          ).fillna(0)
+
+      # 1. Totales Acumulados Globales
+      st.markdown("### 📈 Totales Acumulados Globales")
+      m1, m2, m3, m4 = st.columns(4)
+
+      if "Visitas Realizadas" in df_concentrado.columns:
+        m1.metric(
+            "Visitas Realizadas",
+            int(df_concentrado["Visitas Realizadas"].sum()),
+        )
+
+      if "Periódicos Entregados" in df_concentrado.columns:
+        m2.metric(
+            "Periódicos Entregados",
+            int(df_concentrado["Periódicos Entregados"].sum()),
+        )
+
+      if "Visitas Efectivas" in df_concentrado.columns:
+        m3.metric(
+            "Visitas Efectivas", int(df_concentrado["Visitas Efectivas"].sum())
+        )
+
+      if "Visitas Servidores de la Salud" in df_concentrado.columns:
+        m4.metric(
+            "Visitas Serv. Salud",
+            int(df_concentrado["Visitas Servidores de la Salud"].sum()),
+        )
+
+      st.markdown("---")
+
+      # 2. Estadísticas Desglosadas por Día
+      st.markdown("### 📅 Estadísticas Desglosadas por Día")
+
+      if "Fecha" in df_concentrado.columns:
+        cols_existentes = [
+            col for col in cols_m if col in df_concentrado.columns
+        ]
+        df_diario = (
+            df_concentrado.groupby("Fecha")[cols_existentes]
+            .sum()
+            .reset_index()
+        )
+        st.dataframe(df_diario, use_container_width=True)
+
+        st.markdown("#### 📊 Gráfico de Comparación Diaria")
+        st.bar_chart(df_diario.set_index("Fecha"))
+
+      st.markdown("---")
+
+      # 3. Descarga de Copia en CSV
+      csv = df_concentrado.to_csv(index=False).encode("utf-8")
+      st.download_button(
+          label="📥 Descargar Copia en Excel / CSV",
+          data=csv,
+          file_name="CONCENTRADO_DE_REPORTES_DIARIOS.csv",
+          mime="text/csv",
+      )
+
+  elif password:
+    st.error("❌ Contraseña incorrecta. Intente de nuevo.")
+  else:
+    st.info(
+        "🔑 Por favor ingrese la contraseña para acceder a la información de"
+        " esta sección."
+    )

@@ -115,7 +115,7 @@ with tab_form:
       hour=15, minute=0, second=0, microsecond=0
   )
   hora_cierre = ahora_mexico.replace(
-      hour=18, minute=10, second=0, microsecond=0
+      hour=18, minute=30, second=0, microsecond=0
   )
 
   # Validar estados del sistema

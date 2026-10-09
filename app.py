@@ -15,14 +15,14 @@ st.write(
     "Sistema conectado en tiempo real con Google Sheets (**TERRITORIO**)."
 )
 
-# URL exacta de tu hoja de cálculo de Google Sheets
+# URL exacta de la hoja de cálculo
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1StjBMVIkueBy9sVy5dNh1ylpG5he-51iCYeeaj_mixM/edit"
 
-# Conexión directa
+# Inicializar la conexión
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # ---------------------------------------------------------
-# 1. Leer nombres desde la pestaña PERSONAL_DE_BIENESTAR (Columna B)
+# 1. Cargar nombres del Personal de Bienestar (Pestaña PERSONAL_DE_BIENESTAR)
 # ---------------------------------------------------------
 try:
   df_personal = conn.read(
@@ -31,7 +31,7 @@ try:
       ttl="5m",
   )
 
-  # Tomar la Columna B (índice 1 en Pandas)
+  # Tomar la Columna B (índice 1)
   if df_personal.shape[1] >= 2:
     col_nombres = df_personal.iloc[:, 1]
   else:
@@ -41,11 +41,11 @@ try:
       col_nombres.dropna().astype(str).str.strip().unique().tolist()
   )
 except Exception as e:
-  st.warning(f"No se pudieron cargar los nombres desde Google Sheets: {e}")
+  st.error(f"Error al conectar con Google Sheets: {e}")
   lista_personal = ["Seleccionar..."]
 
 # ---------------------------------------------------------
-# 2. Leer registros desde la pestaña CONCENTRADO_DE_REPORTES_DIARIOS
+# 2. Cargar Concentrado de Reportes
 # ---------------------------------------------------------
 try:
   df_concentrado = conn.read(
@@ -71,9 +71,6 @@ except Exception:
 # ---------------------------------------------------------
 tab_form, tab_tabla = st.tabs(["📝 Capturar Reporte", "📋 Concentrado General"])
 
-# ---------------------------------------------------------
-# TAB 1: FORMULARIO DE CAPTURA
-# ---------------------------------------------------------
 with tab_form:
   st.subheader("Ingreso de Datos Diarios")
 
@@ -111,7 +108,6 @@ with tab_form:
             "Por favor selecciona un miembro válido del Personal de Bienestar."
         )
       else:
-        # Estructurar la nueva fila
         nuevo_registro = pd.DataFrame([{
             "Fecha": fecha.strftime("%Y-%m-%d"),
             "Personal de Bienestar": personal,
@@ -119,15 +115,13 @@ with tab_form:
             "Periódicos Entregados": int(periodicos_entregados),
             "Visitas Efectivas": int(visitas_efectivas),
             "Visitas Servidores de la Salud": int(visitas_salud),
-            "Observaciones": observations if 'observaciones' in locals() else "",
+            "Observaciones": observaciones,
         }])
 
-        # Concatenar con los datos existentes
         df_actualizado = pd.concat(
             [df_concentrado, nuevo_registro], ignore_index=True
         )
 
-        # Escribir la tabla actualizada en Google Sheets
         try:
           conn.update(
               spreadsheet=SPREADSHEET_URL,
@@ -135,36 +129,31 @@ with tab_form:
               data=df_actualizado,
           )
           st.success(
-              f"¡Reporte enviado exitosamente a Google Sheets para {personal}!"
+              f"¡Reporte guardado exitosamente en Google Sheets para {personal}!"
           )
           st.cache_data.clear()
           st.rerun()
         except Exception as ex:
           st.error(f"Error al guardar en Google Sheets: {ex}")
 
-# ---------------------------------------------------------
-# TAB 2: CONCENTRADO GENERAL Y TOTALES
-# ---------------------------------------------------------
 with tab_tabla:
   st.subheader("📋 Concentrado General en Tiempo Real")
 
   if df_concentrado.empty:
     st.info("Aún no se han registrado reportes en el concentrado.")
   else:
-    # Mostrar la tabla completa
     st.dataframe(df_concentrado, use_container_width=True)
 
     st.markdown("---")
     st.markdown("### 📈 Totales Acumulados Globales")
 
-    columnas_metricas = [
+    cols_m = [
         "Visitas Realizadas",
         "Periódicos Entregados",
         "Visitas Efectivas",
         "Visitas Servidores de la Salud",
     ]
-
-    for col in columnas_metricas:
+    for col in cols_m:
       if col in df_concentrado.columns:
         df_concentrado[col] = pd.to_numeric(
             df_concentrado[col], errors="coerce"

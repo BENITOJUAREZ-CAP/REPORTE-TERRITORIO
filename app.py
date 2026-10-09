@@ -13,11 +13,14 @@ st.write(
     "Sistema conectado en tiempo real con Google Sheets (**TERRITORIO**)."
 )
 
-# URLs de Google Sheets
-SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1StjBMVIkueBy9sVy5dNh1ylpG5he-51iCYeeaj_mixM/edit"
-PUBLISHED_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQq16I0eaHC0-Mf4hxWnQFIHdxIO11u5CtDmcDGTJ2UZGgv6YhM-x8RJhW31n6dSKBnFEQO9doPoD1y/pub?gid=700313474&single=true&output=csv"
+# URL exacta de tu hoja de cálculo
+SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1StjBMVIkueBy9sVy5dNh1yIpG5he-51iCYeeaj_mixM/edit"
 
-# Inicializar conexión con Google Sheets
+# Nombres de las pestañas
+HOJA_PERSONAL = "PERSONAL_DE_BIENESTAR"
+HOJA_CONCENTRADO = "CONCENTRADO_DE_REPORTES_DIARIOS"
+
+# Inicializar conexión
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 
@@ -26,17 +29,17 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def cargar_personal():
-  # Intento 1: Vía API oficial de la Cuenta de Servicio
   try:
     df_personal = conn.read(
-        worksheet="PERSONAL_DE_BIENESTAR",
+        spreadsheet=SPREADSHEET_URL,
+        worksheet=HOJA_PERSONAL,
         ttl="1m",
     )
-    if df_personal.shape[1] >= 2:
-      col_nombres = df_personal.iloc[:, 1]
-    else:
-      col_nombres = df_personal.iloc[:, 0]
-
+    col_nombres = (
+        df_personal.iloc[:, 1]
+        if df_personal.shape[1] >= 2
+        else df_personal.iloc[:, 0]
+    )
     nombres = sorted(
         col_nombres.dropna().astype(str).str.strip().unique().tolist()
     )
@@ -55,78 +58,33 @@ def cargar_personal():
     ]
     if len(nombres) > 0:
       return nombres
-  except Exception:
-    pass
+  except Exception as e:
+    st.error(f"Error al cargar el personal: {e}")
 
-  # Intento 2: Vía enlace CSV publicado en la web
-  try:
-    df_publico = pd.read_csv(PUBLISHED_CSV_URL)
-    if df_publico.shape[1] >= 2:
-      col_nombres = df_publico.iloc[:, 1]
-    else:
-      col_nombres = df_publico.iloc[:, 0]
-
-    nombres = sorted(
-        col_nombres.dropna().astype(str).str.strip().unique().tolist()
-    )
-    nombres = [
-        n
-        for n in nombres
-        if n
-        not in [
-            "PERIODICOS ENTREGADOS",
-            "VISITAS EFECTIVAS",
-            "VISITAS SERVIDORES DE LA SALUD",
-            "0",
-            "nan",
-            "Personal de Bienestar",
-        ]
-    ]
-    if len(nombres) > 0:
-      return nombres
-  except Exception:
-    pass
-
-  # Intento 3: Lista de respaldo
-  return [
-      "GRANADOS ROBLES AARON MOISES",
-      "ROJAS SANTIAGO ALAN",
-      "ROMERO CEBALLOS ALFREDO ESSAU",
-      "AMAURI VARGAS LLANOS",
-      "ALVARADO CRUZ ARSENIA",
-      "GALICIA DECTOR CAROLINA",
-      "GODINEZ CORTES CITLALLI ARAIS",
-      "RICO CONTRERAS CLAUDINE",
-      "GUERRERO RIOS DIEGO EMILIO",
-      "MEDRANO CERDA EDNA DEL CARMEN",
-      "MORA ROMERO ELIZABETH",
-      "ROMERO PADILLA ELIZABETH",
-      "VAZQUEZ VIDALS ESTELA",
-      "AGUILAR LUCAS GABRIELA",
-      "HERRERA GUERRERO GENOVEVA",
-      "VILCHIS FUENTES HILDA",
-      "PAREDES ALONSO HILDA GUADALUPE",
-      "JAIME MARTINEZ GARCIA",
-      "BRAVO MORENO JAZMIN",
-      "ARZATE CORDOVA JESUS",
-      "OCEGUERA GAYOSSO JOEL",
-      "CORTES RUBIN JOSE ALEJANDRO",
-      "BOTELLO CERDA JUANA",
-  ]
+  return ["Seleccionar..."]
 
 
 lista_personal = cargar_personal()
 
+
 # ---------------------------------------------------------
 # 2. Cargar Concentrado de Reportes
 # ---------------------------------------------------------
-try:
-  df_concentrado = conn.read(
-      worksheet="CONCENTRADO_DE_REPORTES_DIARIOS",
-      ttl="0s",
-  )
-except Exception:
-  df_concentrado = pd.DataFrame(
+def obtener_concentrado():
+  for nombre_hoja in [
+      "CONCENTRADO_DE_REPORTES_DIARIOS",
+      "CONTENTRADO_DE_REPORTES_DIARIOS",
+  ]:
+    try:
+      df = conn.read(
+          spreadsheet=SPREADSHEET_URL,
+          worksheet=nombre_hoja,
+          ttl="0s",
+      )
+      return nombre_hoja, df
+    except Exception:
+      pass
+  return HOJA_CONCENTRADO, pd.DataFrame(
       columns=[
           "Fecha",
           "Personal de Bienestar",
@@ -137,6 +95,9 @@ except Exception:
           "Observaciones",
       ]
   )
+
+
+nombre_pestaña_real, df_concentrado = obtener_concentrado()
 
 # ---------------------------------------------------------
 # Pestañas de la aplicación
@@ -199,7 +160,8 @@ with tab_form:
 
         try:
           conn.update(
-              worksheet="CONCENTRADO_DE_REPORTES_DIARIOS",
+              spreadsheet=SPREADSHEET_URL,
+              worksheet=nombre_pestaña_real,
               data=df_actualizado,
           )
           st.success(
@@ -251,20 +213,4 @@ with tab_tabla:
 
     if "Visitas Efectivas" in df_concentrado.columns:
       m3.metric(
-          "Visitas Efectivas", int(df_concentrado["Visitas Efectivas"].sum())
-      )
-
-    if "Visitas Servidores de la Salud" in df_concentrado.columns:
-      m4.metric(
-          "Visitas Serv. Salud",
-          int(df_concentrado["Visitas Servidores de la Salud"].sum()),
-      )
-
-    st.markdown("---")
-    csv = df_concentrado.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="📥 Descargar Copia en Excel / CSV",
-        data=csv,
-        file_name="CONCENTRADO_DE_REPORTES_DIARIOS.csv",
-        mime="text/csv",
-    )
+          "Visitas Efectivas", int(df_concent

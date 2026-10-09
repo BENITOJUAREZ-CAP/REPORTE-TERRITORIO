@@ -116,7 +116,10 @@ with tab_form:
     col_a, col_b = st.columns(2)
 
     with col_a:
-      fecha = st.date_input("Fecha de captura", value=date.today())
+      # Fecha bloqueada (disabled=True) para que solo puedan visualizarla sin editarla
+      fecha = st.date_input(
+          "Fecha de captura", value=date.today(), disabled=True
+      )
       personal = st.selectbox("Personal de Bienestar", options=lista_personal)
       visitas_realizadas = st.number_input(
           "1. Visitas Realizadas", min_value=0, step=1, value=0
@@ -141,38 +144,64 @@ with tab_form:
     )
 
     if guardar:
+      fecha_str = fecha.strftime("%Y-%m-%d")
+
+      # Validación 1: Selección de personal
       if not personal or personal == "Seleccionar...":
         st.error(
             "Por favor selecciona un miembro válido del Personal de Bienestar."
         )
       else:
-        nuevo_registro = pd.DataFrame([{
-            "Fecha": fecha.strftime("%Y-%m-%d"),
-            "Personal de Bienestar": personal,
-            "Visitas Realizadas": int(visitas_realizadas),
-            "Periódicos Entregados": int(periodicos_entregados),
-            "Visitas Efectivas": int(visitas_efectivas),
-            "Visitas Servidores de la Salud": int(visitas_salud),
-            "Observaciones": observaciones,
-        }])
+        # Validación 2: Verificar si ya existe un registro para la misma persona y fecha
+        ya_registrado = False
+        if (
+            not df_concentrado.empty
+            and "Fecha" in df_concentrado.columns
+            and "Personal de Bienestar" in df_concentrado.columns
+        ):
+          existe = df_concentrado[
+              (df_concentrado["Fecha"].astype(str).str.strip() == fecha_str)
+              & (
+                  df_concentrado["Personal de Bienestar"].astype(str).str.strip()
+                  == personal.strip()
+              )
+          ]
+          if not existe.empty:
+            ya_registrado = True
 
-        df_actualizado = pd.concat(
-            [df_concentrado, nuevo_registro], ignore_index=True
-        )
+        if ya_registrado:
+          st.warning(
+              f"⚠️ **{personal}** ya registró su reporte para la fecha"
+              f" **{fecha_str}**. Solo se permite un envío por día."
+          )
+        else:
+          nuevo_registro = pd.DataFrame([{
+              "Fecha": fecha_str,
+              "Personal de Bienestar": personal,
+              "Visitas Realizadas": int(visitas_realizadas),
+              "Periódicos Entregados": int(periodicos_entregados),
+              "Visitas Efectivas": int(visitas_efectivas),
+              "Visitas Servidores de la Salud": int(visitas_salud),
+              "Observaciones": observaciones,
+          }])
 
-        try:
-          conn.update(
-              spreadsheet=SPREADSHEET_URL,
-              worksheet=nombre_pestaña_real,
-              data=df_actualizado,
+          df_actualizado = pd.concat(
+              [df_concentrado, nuevo_registro], ignore_index=True
           )
-          st.success(
-              f"¡Reporte guardado exitosamente en Google Sheets para {personal}!"
-          )
-          st.cache_data.clear()
-          st.rerun()
-        except Exception as ex:
-          st.error(f"Error al guardar en Google Sheets: {ex}")
+
+          try:
+            conn.update(
+                spreadsheet=SPREADSHEET_URL,
+                worksheet=nombre_pestaña_real,
+                data=df_actualizado,
+            )
+            st.success(
+                f"¡Reporte guardado exitosamente en Google Sheets para {personal}!"
+            )
+            st.cache_data.clear()
+            st.rerun()
+          except Exception as ex:
+            st.error(f"Error al guardar en Google Sheets: {ex}")
 
 # ---------------------------------------------------------
 # TAB 2: ESTADÍSTICAS Y ACUMULADOS

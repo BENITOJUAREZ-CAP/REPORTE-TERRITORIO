@@ -106,21 +106,42 @@ tab_form, tab_tabla = st.tabs(
 with tab_form:
   st.subheader("Ingreso de Datos Diarios")
 
-  # Hora de CDMX
+  # Hora actual en CDMX
   tz_mexico = ZoneInfo("America/Mexico_City")
   ahora_mexico = datetime.now(tz_mexico)
-  hora_limite = ahora_mexico.replace(
+
+  # Definir horario de apertura (15:00) y cierre (18:10)
+  hora_apertura = ahora_mexico.replace(
+      hour=15, minute=0, second=0, microsecond=0
+  )
+  hora_cierre = ahora_mexico.replace(
       hour=18, minute=10, second=0, microsecond=0
   )
 
-  # Bloqueo a las 18:10 hrs
-  sistema_bloqueado = ahora_mexico >= hora_limite
+  # Validar estados del sistema
+  antes_de_abrir = ahora_mexico < hora_apertura
+  despues_de_cierre = ahora_mexico >= hora_cierre
+  sistema_bloqueado = antes_de_abrir or despues_de_cierre
 
-  if sistema_bloqueado:
+  if antes_de_abrir:
+    st.warning(
+        "⏳ **El sistema aún no se encuentra abierto.** El horario de captura"
+        " inicia a las **15:00 hrs** (Hora México)."
+    )
+  elif despues_de_cierre:
     st.warning(
         "🕒 **El sistema de captura se encuentra cerrado.** El horario límite"
-        " de envío es a las **18:10 hrs** (Hora México). Podrás ingresar nuevos"
-        " reportes el día de mañana."
+        " de envío concluyó a las **18:10 hrs** (Hora México). Podrás ingresar"
+        " nuevos reportes el día de mañana."
+    )
+  else:
+    # Mostrar contador dinámico de tiempo restante para el cierre
+    tiempo_restante = hora_cierre - ahora_mexico
+    horas, resto = divmod(int(tiempo_restante.total_seconds()), 3600)
+    minutos, segundos = divmod(resto, 60)
+    st.info(
+        f"⏱️ **Sistema abierto.** Tiempo restante para el cierre: **{horas:02d}"
+        f" horas, {minutos:02d} minutos, {segundos:02d} segundos**."
     )
 
   with st.form("form_territorio", clear_on_submit=True):

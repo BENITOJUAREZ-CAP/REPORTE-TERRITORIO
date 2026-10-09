@@ -15,7 +15,7 @@ st.write(
     "Sistema conectado en tiempo real con Google Sheets (**TERRITORIO**)."
 )
 
-# URL exacta de la hoja de cálculo
+# URL exacta y limpia de la hoja de cálculo
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1StjBMVIkueBy9sVy5dNh1ylpG5he-51iCYeeaj_mixM/edit"
 
 # Inicializar la conexión
@@ -28,7 +28,7 @@ try:
   df_personal = conn.read(
       spreadsheet=SPREADSHEET_URL,
       worksheet="PERSONAL_DE_BIENESTAR",
-      ttl="5m",
+      ttl="1m",
   )
 
   # Tomar la Columna B (índice 1)
@@ -71,6 +71,9 @@ except Exception:
 # ---------------------------------------------------------
 tab_form, tab_tabla = st.tabs(["📝 Capturar Reporte", "📋 Concentrado General"])
 
+# ---------------------------------------------------------
+# TAB 1: FORMULARIO DE CAPTURA
+# ---------------------------------------------------------
 with tab_form:
   st.subheader("Ingreso de Datos Diarios")
 
@@ -136,6 +139,9 @@ with tab_form:
         except Exception as ex:
           st.error(f"Error al guardar en Google Sheets: {ex}")
 
+# ---------------------------------------------------------
+# TAB 2: CONCENTRADO GENERAL Y TOTALES
+# ---------------------------------------------------------
 with tab_tabla:
   st.subheader("📋 Concentrado General en Tiempo Real")
 

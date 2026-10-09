@@ -1,8 +1,3 @@
 streamlit
 pandas
-openpyxl
-google-api-python-client
-google-auth
-gspread
-pytz
-pyarrow
+st-gsheets-connection

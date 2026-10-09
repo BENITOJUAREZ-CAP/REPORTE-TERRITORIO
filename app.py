@@ -15,14 +15,21 @@ st.write(
     "Sistema conectado en tiempo real con Google Sheets (**TERRITORIO**)."
 )
 
-# Conexión directa con Google Sheets mediante Secrets
+# URL exacta de tu hoja de cálculo de Google Sheets
+SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1StjBMVIkueBy9sVy5dNh1ylpG5he-51iCYeeaj_mixM/edit"
+
+# Conexión directa
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # ---------------------------------------------------------
 # 1. Leer nombres desde la pestaña PERSONAL_DE_BIENESTAR (Columna B)
 # ---------------------------------------------------------
 try:
-  df_personal = conn.read(worksheet="PERSONAL_DE_BIENESTAR", ttl="5m")
+  df_personal = conn.read(
+      spreadsheet=SPREADSHEET_URL,
+      worksheet="PERSONAL_DE_BIENESTAR",
+      ttl="5m",
+  )
 
   # Tomar la Columna B (índice 1 en Pandas)
   if df_personal.shape[1] >= 2:
@@ -42,7 +49,9 @@ except Exception as e:
 # ---------------------------------------------------------
 try:
   df_concentrado = conn.read(
-      worksheet="CONCENTRADO_DE_REPORTES_DIARIOS", ttl="0s"
+      spreadsheet=SPREADSHEET_URL,
+      worksheet="CONCENTRADO_DE_REPORTES_DIARIOS",
+      ttl="0s",
   )
 except Exception:
   df_concentrado = pd.DataFrame(
@@ -110,7 +119,7 @@ with tab_form:
             "Periódicos Entregados": int(periodicos_entregados),
             "Visitas Efectivas": int(visitas_efectivas),
             "Visitas Servidores de la Salud": int(visitas_salud),
-            "Observaciones": observaciones,
+            "Observaciones": observations if 'observaciones' in locals() else "",
         }])
 
         # Concatenar con los datos existentes
@@ -121,7 +130,9 @@ with tab_form:
         # Escribir la tabla actualizada en Google Sheets
         try:
           conn.update(
-              worksheet="CONCENTRADO_DE_REPORTES_DIARIOS", data=df_actualizado
+              spreadsheet=SPREADSHEET_URL,
+              worksheet="CONCENTRADO_DE_REPORTES_DIARIOS",
+              data=df_actualizado,
           )
           st.success(
               f"¡Reporte enviado exitosamente a Google Sheets para {personal}!"
@@ -146,7 +157,6 @@ with tab_tabla:
     st.markdown("---")
     st.markdown("### 📈 Totales Acumulados Globales")
 
-    # Asegurar conversión numérica para realizar la suma correctamente
     columnas_metricas = [
         "Visitas Realizadas",
         "Periódicos Entregados",

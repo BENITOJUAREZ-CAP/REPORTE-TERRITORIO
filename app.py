@@ -249,9 +249,13 @@ with tab_form:
                 worksheet=nombre_pestaña_real,
                 data=df_actualizado,
             )
-            st.success(f"¡Reporte guardado exitosamente para {personal}!")
+            # Mensaje destacado de guardado exitoso
+            st.success(
+                f"🎉 ¡GUARDADO EXITOSAMENTE! El reporte de **{personal}** se ha"
+                " registrado correctamente en Google Sheets."
+            )
+            st.balloons()
             st.cache_data.clear()
-            st.rerun()
           except Exception as ex:
             st.error(f"Error al guardar en Google Sheets: {ex}")
 

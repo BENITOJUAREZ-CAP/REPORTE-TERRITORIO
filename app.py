@@ -173,35 +173,20 @@ with tab_comparativa:
   if p_comp == "Monica.1":
     st.success("Acceso concedido.")
 
-    hoja_matriz = st.text_input(
-        "Nombre de la pestaña o GID de la hoja Matriz:",
-        value="REPORTES",
-    )
-
+    # Lectura directa automática de la primera pestaña (0) sin pedir nombres
     df_matriz = None
     try:
-      sheet_val = (
-          int(hoja_matriz.strip())
-          if hoja_matriz.strip().isdigit()
-          else hoja_matriz.strip()
-      )
-      # Al estar limpio el Excel con cabecera en Fila 1, leemos directo
       df_matriz = conn.read(
-          spreadsheet=SPREADSHEET_URL, worksheet=sheet_val, ttl="0s"
+          spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
       )
-    except Exception:
-      try:
-        df_matriz = conn.read(
-            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
-        )
-      except Exception as err:
-        st.error(f"No se pudo leer la hoja matriz: {err}")
+    except Exception as err:
+      st.error(f"No se pudo leer la hoja matriz: {err}")
 
     if df_matriz is not None and not df_matriz.empty:
       fechas_disp = []
       if not df_concentrado.empty and "Fecha" in df_concentrado.columns:
         fechas_disp = sorted(
-            df_concentrado["Fecha"].dropna().astype(str).unique().tolist(),
+            df_concentrado["Fecha"].dropna().astype(str).str.unique().tolist(),
             reverse=True,
         )
 
@@ -238,7 +223,7 @@ with tab_comparativa:
               "Territorio (Concentrado)",
           ]
 
-          # 2. Buscar la columna que coincida con la fecha elegida en la tabla limpia
+          # 2. Buscar la columna que coincida con la fecha elegida en la tabla de Bienestar
           cols_matriz = [str(c).strip() for c in df_matriz.columns]
           col_fecha_encontrada = None
           for col in cols_matriz:

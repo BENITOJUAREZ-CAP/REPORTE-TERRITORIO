@@ -216,74 +216,70 @@ with tab_comparativa:
     )
 
     if st.button("🚀 Ejecutar Comparación y Generar Reporte", type="primary"):
+      df_matriz = None
+      # Intentar leer con la pestaña especificada, y si falla, intentar con la primera hoja por defecto
       try:
-        # Lectura directa usando la conexión oficial de Streamlit
         df_matriz = conn.read(
             spreadsheet=SPREADSHEET_URL,
             worksheet=hoja_matriz_input.strip(),
             ttl="0s",
         )
-
-        if df_matriz is not None and not df_matriz.empty:
-          st.success(
-              f"¡Pestaña **'{hoja_matriz_input}'** leída correctamente con"
-              " gsheets!"
+      except Exception:
+        try:
+          df_matriz = conn.read(
+              spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
           )
-          st.write("### 📋 Vista Previa del Reporte Matriz Horizontal")
-          st.dataframe(df_matriz.head(10), use_container_width=True)
+        except Exception as ex2:
+          st.error(
+              "No se pudo leer la hoja de Google Sheets. Asegúrate de que el"
+              " archivo sea público o tenga permisos de lectura compartidos"
+              f" con la cuenta de servicio. Detalle: {ex2}"
+          )
 
-          if df_concentrado is not None and not df_concentrado.empty:
-            st.markdown("---")
-            st.markdown("### 📊 Gráficas y Métricas de Comparación")
+      if df_matriz is not None and not df_matriz.empty:
+        st.success("¡Datos del reporte horizontal leídos correctamente!")
+        st.write("### 📋 Vista Previa del Reporte Matriz Horizontal")
+        st.dataframe(df_matriz.head(10), use_container_width=True)
 
-            df_c = df_concentrado.copy()
-            df_c["Personal_Clean"] = (
-                df_c["Personal de Bienestar"]
-                .astype(str)
-                .str.strip()
-                .str.upper()
-            )
-            df_c["Visitas Efectivas"] = pd.to_numeric(
-                df_c["Visitas Efectivas"], errors="coerce"
-            ).fillna(0)
+        if df_concentrado is not None and not df_concentrado.empty:
+          st.markdown("---")
+          st.markdown("### 📊 Gráficas y Métricas de Comparación")
 
-            col_m1, col_m2 = st.columns(2)
-            with col_m1:
-              total_efectivas = int(df_c["Visitas Efectivas"].sum())
-              st.metric(
-                  "Total Visitas Efectivas (Concentrado)", total_efectivas
-              )
-            with col_m2:
-              total_personas = df_c["Personal_Clean"].nunique()
-              st.metric("Total Personal con Capturas", total_personas)
+          df_c = df_concentrado.copy()
+          df_c["Personal_Clean"] = (
+              df_c["Personal de Bienestar"].astype(str).str.strip().str.upper()
+          )
+          df_c["Visitas Efectivas"] = pd.to_numeric(
+              df_c["Visitas Efectivas"], errors="coerce"
+          ).fillna(0)
 
-            # Gráfica de Barras
-            df_grafica = (
-                df_c.groupby("Personal_Clean")["Visitas Efectivas"]
-                .sum()
-                .reset_index()
-            )
-            st.write("#### 📈 Visitas Efectivas por Personal de Bienestar")
-            st.bar_chart(df_grafica.set_index("Personal_Clean"))
+          col_m1, col_m2 = st.columns(2)
+          with col_m1:
+            total_efectivas = int(df_c["Visitas Efectivas"].sum())
+            st.metric("Total Visitas Efectivas (Concentrado)", total_efectivas)
+          with col_m2:
+            total_personas = df_c["Personal_Clean"].nunique()
+            st.metric("Total Personal con Capturas", total_personas)
 
-            # Botón de Descarga Excel / CSV del Reporte Comparativo
-            csv_comp = df_c.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="📥 Descargar Nuevo Excel Comparativo (CSV)",
-                data=csv_comp,
-                file_name=f"REPORTE_COMPARATIVO_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-            )
-          else:
-            st.info("El concentrado de reportes diarios aún no tiene registros.")
+          # Gráfica de Barras
+          df_grafica = (
+              df_c.groupby("Personal_Clean")["Visitas Efectivas"]
+              .sum()
+              .reset_index()
+          )
+          st.write("#### 📈 Visitas Efectivas por Personal de Bienestar")
+          st.bar_chart(df_grafica.set_index("Personal_Clean"))
+
+          # Botón de Descarga
+          csv_comp = df_c.to_csv(index=False).encode("utf-8")
+          st.download_button(
+              label="📥 Descargar Nuevo Excel Comparativo (CSV)",
+              data=csv_comp,
+              file_name=f"REPORTE_COMPARATIVO_{datetime.now().strftime('%Y%m%d')}.csv",
+              mime="text/csv",
+          )
         else:
-          st.warning("No se encontraron filas en la pestaña especificada.")
-
-      except Exception as e:
-        st.error(
-            f"Error al leer la pestaña '{hoja_matriz_input}'. Verifica que"
-            f" exista en tu Google Sheets. Detalle: {e}"
-        )
+          st.info("El concentrado de reportes diarios aún no tiene registros.")
 
   elif password_comp:
     st.error("❌ Contraseña incorrecta.")

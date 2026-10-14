@@ -1,5 +1,4 @@
 from datetime import date, datetime
-import re
 from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
@@ -22,7 +21,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 
 # ---------------------------------------------------------
-# Cargar Datos
+# Cargar Personal
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def cargar_personal():
@@ -35,10 +34,9 @@ def cargar_personal():
       nombres = sorted(
           col_nombres.dropna().astype(str).str.strip().unique().tolist()
       )
-      nombres = [
-          n for n in nombres if n and n not in ["nan", "Personal de Bienestar"]
+      return ["Seleccionar..."] + [
+          n for n in nombres if n and n != "nan" and n != "Personal de Bienestar"
       ]
-      return ["Seleccionar..."] + nombres
   except Exception:
     pass
   return ["Seleccionar..."]
@@ -53,13 +51,13 @@ def obtener_concentrado():
         spreadsheet=SPREADSHEET_URL, worksheet=HOJA_CONCENTRADO, ttl="0s"
     )
     if df is not None:
-      return HOJA_CONCENTRADO, df
+      return df
   except Exception:
     pass
-  return HOJA_CONCENTRADO, pd.DataFrame()
+  return pd.DataFrame()
 
 
-nombre_pestaña_real, df_concentrado = obtener_concentrado()
+df_concentrado = obtener_concentrado()
 
 # Pestañas principales
 tab_form, tab_tabla, tab_comparativa = st.tabs([
@@ -82,25 +80,14 @@ with tab_form:
   hora_cierre = ahora_mexico.replace(
       hour=18, minute=30, second=0, microsecond=0
   )
+  sistema_bloqueado = not (hora_apertura <= ahora_mexico < hora_cierre)
 
-  antes_de_abrir = ahora_mexico < hora_apertura
-  despues_de_cierre = ahora_mexico >= hora_cierre
-  sistema_bloqueado = antes_de_abrir or despues_de_cierre
-
-  if antes_de_abrir:
-    st.warning(
-        "⏳ **El sistema aún no se encuentra abierto.** Horario: 15:00 hrs."
-    )
-  elif despues_de_cierre:
-    st.warning("🕒 **El sistema de captura se encuentra cerrado.**")
+  if ahora_mexico < hora_apertura:
+    st.warning("⏳ El sistema abrirá a las 15:00 hrs.")
+  elif ahora_mexico >= hora_cierre:
+    st.warning("🕒 El sistema de captura se encuentra cerrado.")
   else:
-    tiempo_restante = hora_cierre - ahora_mexico
-    horas, resto = divmod(int(tiempo_restante.total_seconds()), 3600)
-    minutos, segundos = divmod(resto, 60)
-    st.info(
-        f"⏱️ **Sistema abierto.** Restante: **{horas:02d}h {minutos:02d}m"
-        f" {segundos:02d}s**."
-    )
+    st.info("⏱️ Sistema abierto para captura.")
 
   with st.form("form_territorio", clear_on_submit=True):
     col_a, col_b = st.columns(2)
@@ -114,51 +101,38 @@ with tab_form:
           disabled=sistema_bloqueado,
       )
       visitas_realizadas = st.number_input(
-          "1. Visitas Realizadas",
-          min_value=0,
-          step=1,
-          value=0,
-          disabled=sistema_bloqueado,
+          "Visitas Realizadas", min_value=0, step=1, disabled=sistema_bloqueado
       )
       periodicos_entregados = st.number_input(
-          "2. Periódicos Entregados",
+          "Periódicos Entregados",
           min_value=0,
           step=1,
-          value=0,
           disabled=sistema_bloqueado,
       )
     with col_b:
       visitas_efectivas = st.number_input(
-          "3. Visitas Efectivas",
-          min_value=0,
-          step=1,
-          value=0,
-          disabled=sistema_bloqueado,
+          "Visitas Efectivas", min_value=0, step=1, disabled=sistema_bloqueado
       )
       visitas_salud = st.number_input(
-          "4. Visitas Servidores de la Salud",
+          "Visitas Servidores de la Salud",
           min_value=0,
           step=1,
-          value=0,
           disabled=sistema_bloqueado,
       )
       observaciones = st.text_area(
-          "Observaciones adicionales", height=100, disabled=sistema_bloqueado
+          "Observaciones", height=100, disabled=sistema_bloqueado
       )
 
     guardar = st.form_submit_button(
-        "💾 Guardar en Google Sheets",
-        type="primary",
-        disabled=sistema_bloqueado,
+        "💾 Guardar", type="primary", disabled=sistema_bloqueado
     )
 
     if guardar and not sistema_bloqueado:
-      fecha_str = fecha.strftime("%Y-%m-%d")
       if not personal or personal == "Seleccionar...":
-        st.error("Selecciona un miembro válido.")
+        st.error("Selecciona un nombre válido.")
       else:
         nuevo_registro = pd.DataFrame([{
-            "Fecha": fecha_str,
+            "Fecha": fecha.strftime("%Y-%m-%d"),
             "Personal de Bienestar": personal,
             "Visitas Realizadas": int(visitas_realizadas),
             "Periódicos Entregados": int(periodicos_entregados),
@@ -166,139 +140,103 @@ with tab_form:
             "Visitas Servidores de la Salud": int(visitas_salud),
             "Observaciones": observaciones,
         }])
-        df_actualizado = pd.concat(
-            [df_concentrado, nuevo_registro], ignore_index=True
-        )
+        df_act = pd.concat([df_concentrado, nuevo_registro], ignore_index=True)
         try:
           conn.update(
               spreadsheet=SPREADSHEET_URL,
-              worksheet=nombre_pestaña_real,
-              data=df_actualizado,
+              worksheet=HOJA_CONCENTRADO,
+              data=df_act,
           )
-          st.success(f"🎉 ¡Reporte de **{personal}** guardado exitosamente!")
+          st.success("🎉 ¡Guardado exitosamente!")
           st.balloons()
           st.cache_data.clear()
-        except Exception as ex:
-          st.error(f"Error al guardar: {ex}")
+        except Exception as e:
+          st.error(f"Error al guardar: {e}")
 
 # ---------------------------------------------------------
 # TAB 2: ESTADÍSTICAS Y ACUMULADOS
 # ---------------------------------------------------------
 with tab_tabla:
   st.subheader("📊 Estadísticas y Acumulados")
-  password_stat = st.text_input(
-      "🔒 Contraseña de acceso para estadísticas:", type="password", key="p_stat"
-  )
-  if password_stat == "Monica.1":
-    st.success("🔓 Acceso concedido.")
-    if df_concentrado is not None and not df_concentrado.empty:
+  p_stat = st.text_input("🔒 Contraseña:", type="password", key="ps")
+  if p_stat == "Monica.1":
+    st.success("Acceso concedido.")
+    if not df_concentrado.empty:
       st.dataframe(df_concentrado, use_container_width=True)
-  elif password_stat:
-    st.error("❌ Contraseña incorrecta.")
+  elif p_stat:
+    st.error("Contraseña incorrecta.")
 
 # ---------------------------------------------------------
-# TAB 3: COMPARATIVA DE VISITAS EFECTIVAS POR DÍA (PROTEGIDA)
+# TAB 3: COMPARATIVA (PROTEGIDA)
 # ---------------------------------------------------------
 with tab_comparativa:
   st.subheader("🔍 Comparativa de Visitas Efectivas por Día")
+  p_comp = st.text_input("🔒 Contraseña para Comparativa:", type="password", key="pc")
 
-  password_comp = st.text_input(
-      "🔒 Ingrese la contraseña de acceso para la Comparativa:",
-      type="password",
-      key="p_comp",
-  )
+  if p_comp == "Monica.1":
+    st.success("Acceso concedido.")
 
-  if password_comp == "Monica.1":
-    st.success("🔓 Acceso concedido a la sección de Comparativa.")
+    hoja_matriz = st.text_input("Nombre de la pestaña matriz:", value="Reporte")
 
-    hoja_matriz_input = st.text_input(
-        "Pestaña del reporte matriz horizontal:",
-        value="Reporte",
-    )
-
-    df_matriz_raw = None
+    df_matriz = None
     try:
-      df_matriz_raw = conn.read(
-          spreadsheet=SPREADSHEET_URL,
-          worksheet=hoja_matriz_input.strip(),
-          ttl="0s",
+      df_matriz = conn.read(
+          spreadsheet=SPREADSHEET_URL, worksheet=hoja_matriz.strip(), ttl="0s"
       )
     except Exception:
       try:
-        df_matriz_raw = conn.read(
+        df_matriz = conn.read(
             spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
         )
       except Exception:
         pass
 
-    if df_matriz_raw is not None and not df_matriz_raw.empty:
-      df_matriz = df_matriz_raw.copy()
-
-      # Cargar fechas del Concentrado Diario
-      df_c = (
-          df_concentrado.copy()
-          if df_concentrado is not None
-          else pd.DataFrame()
-      )
-      fechas_disponibles = []
-      if not df_c.empty and "Fecha" in df_c.columns:
-        df_c["Visitas Efectivas"] = pd.to_numeric(
-            df_c["Visitas Efectivas"], errors="coerce"
-        ).fillna(0)
-        df_c["Personal_Clean"] = (
-            df_c["Personal de Bienestar"].astype(str).str.strip().str.upper()
-        )
-        fechas_disponibles = sorted(
-            df_c["Fecha"].dropna().astype(str).str.strip().unique().tolist(),
+    if df_matriz is not None and not df_matriz.empty:
+      # Fechas disponibles en el Concentrado
+      fechas_disp = []
+      if not df_concentrado.empty and "Fecha" in df_concentrado.columns:
+        fechas_disp = sorted(
+            df_concentrado["Fecha"].dropna().astype(str).unique().tolist(),
             reverse=True,
         )
 
-      # Mapear columnas del Excel de la hoja matriz
-      cols_matriz = [str(c).strip() for c in df_matriz.columns]
+      cols = list(df_matriz.columns)
 
-      # Identificar columna del Servidor de la Nación
-      idx_persona = 0
-      for idx, c in enumerate(cols_matriz):
-        if any(
-            k in c.lower()
-            for k in ["servidor", "personal", "nombre", "bienestar"]
-        ):
-          idx_persona = idx
-          break
-
-      col_fecha_sel, col_matriz_sel = st.columns(2)
-      with col_fecha_sel:
-        fecha_filtro = st.selectbox(
-            "📅 Selecciona el día a comparar (Concentrado):",
-            options=fechas_disponibles
-            if fechas_disponibles
-            else ["Sin fechas"],
+      c1, c2 = st.columns(2)
+      with c1:
+        f_sel = st.selectbox(
+            "📅 Fecha (Concentrado Diario):",
+            options=fechas_disp if fechas_disp else ["Sin fechas"],
         )
-      with col_matriz_sel:
-        # Ofrecer únicamente las columnas desde la posición F (índice 5 en adelante) o desde la posición 1
-        opciones_matriz = cols_matriz
-        idx_col_sel = st.selectbox(
-            "📊 Selecciona el día equivalente (Excel Reporte):",
-            options=range(len(cols_matriz)),
-            format_func=lambda i: f"Columna {i+1}: {cols_matriz[i]}",
+      with c2:
+        col_idx = st.selectbox(
+            "📊 Columna en la Matriz (Día):",
+            options=range(len(cols)),
+            format_func=lambda i: f"Columna {i+1}: {cols[i]}",
+            index=min(5, len(cols) - 1),  # Apunta por defecto cerca de la columna F
         )
 
-      if st.button("🚀 Comparar Visitas Efectivas del Día", type="primary"):
+      if st.button("🚀 Ejecutar Comparativa", type="primary"):
         try:
-          # 1. Concentrado Diario
-          df_c_dia = (
-              df_c[df_c["Fecha"] == fecha_filtro].copy()
-              if not df_c.empty
-              else pd.DataFrame()
+          # 1. Agrupar concentrado por día
+          df_c = df_concentrado.copy()
+          df_c["Personal_Clean"] = (
+              df_c["Personal de Bienestar"].astype(str).str.strip().str.upper()
           )
+          df_c["Visitas Efectivas"] = pd.to_numeric(
+              df_c["Visitas Efectivas"], errors="coerce"
+          ).fillna(0)
+
+          df_c_dia = df_c[df_c["Fecha"] == f_sel]
           df_c_grouped = (
               df_c_dia.groupby("Personal_Clean")["Visitas Efectivas"]
               .sum()
               .reset_index()
           )
 
-          # 2. Excel Matriz por índice numérico seguro
-          df_m = df_matriz.iloc[:, [idx_persona, idx_col_sel]].copy()
+          # 2. Extraer datos del Excel Matriz por posición de columna
+          # Columna 1 (índice 1 o 0) para el nombre, y col_idx para el valor
+          df_m = df_matriz.iloc[:, [1, col_idx]].copy()
           df_m.columns = ["Personal_Clean", "Efectivas_Matriz"]
           df_m["Personal_Clean"] = (
               df_m["Personal_Clean"].astype(str).str.strip().str.upper()
@@ -307,75 +245,66 @@ with tab_comparativa:
               df_m["Efectivas_Matriz"], errors="coerce"
           ).fillna(0)
 
-          # 3. Cruzar ambos datos
-          df_cruse = pd.merge(
+          # 3. Cruzar la información
+          df_final = pd.merge(
               df_c_grouped, df_m, on="Personal_Clean", how="outer"
           ).fillna(0)
-          df_cruse.columns = [
+          df_final.columns = [
               "Servidor de la Nación",
               "Efectivas (Concentrado)",
               "Efectivas (Matriz)",
           ]
-          df_cruse["Diferencia"] = (
-              df_cruse["Efectivas (Concentrado)"]
-              - df_cruse["Efectivas (Matriz)"]
+          df_final["Diferencia"] = (
+              df_final["Efectivas (Concentrado)"]
+              - df_final["Efectivas (Matriz)"]
           )
 
-          # 4. Gráficas Lado a Lado
+          # 4. Mostrar Gráficas Lado a Lado
           st.markdown("---")
-          st.markdown(
-              "### 📊 Comparativa de Visitas Efectivas para el día:"
-              f" **{fecha_filtro}**"
-          )
+          st.markdown(f"### 📈 Resultados para el día: **{f_sel}**")
 
-          g1, g2 = st.columns(2)
-          with g1:
-            st.write("#### 📝 1. Concentrado Diario (Streamlit)")
+          gc1, gc2 = st.columns(2)
+          with gc1:
+            st.write("#### 📝 1. Concentrado Diario")
             st.bar_chart(
-                df_cruse.set_index("Servidor de la Nación")[
+                df_final.set_index("Servidor de la Nación")[
                     "Efectivas (Concentrado)"
                 ]
             )
             st.metric(
-                "Total Efectivas Concentrado",
-                int(df_cruse["Efectivas (Concentrado)"].sum()),
+                "Total Concentrado",
+                int(df_final["Efectivas (Concentrado)"].sum()),
             )
 
-          with g2:
-            st.write(
-                "#### 📄 2. Excel Reporte"
-                f" ({cols_matriz[idx_col_sel]})"
-            )
+          with gc2:
+            st.write(f"#### 📄 2. Excel Matriz ({cols[col_idx]})")
             st.bar_chart(
-                df_cruse.set_index("Servidor de la Nación")[
+                df_final.set_index("Servidor de la Nación")[
                     "Efectivas (Matriz)"
                 ]
             )
             st.metric(
-                "Total Efectivas Matriz",
-                int(df_cruse["Efectivas (Matriz)"].sum()),
+                "Total Matriz", int(df_final["Efectivas (Matriz)"].sum())
             )
 
           st.markdown("---")
-          st.markdown(
-              "### 📋 Tabla Comparativa Detallada por Servidor de la Nación"
-          )
-          st.dataframe(df_cruse, use_container_width=True)
+          st.markdown("### 📋 Tabla Detallada")
+          st.dataframe(df_final, use_container_width=True)
 
-          # Descargar CSV
-          csv_comp = df_cruse.to_csv(index=False).encode("utf-8")
+          # Descarga CSV
+          csv_data = df_final.to_csv(index=False).encode("utf-8")
           st.download_button(
-              label="📥 Descargar Comparativa del Día en Excel / CSV",
-              data=csv_comp,
-              file_name=f"COMPARATIVA_EFECTIVAS_{fecha_filtro}.csv",
+              label="📥 Descargar Reporte Comparativo (CSV)",
+              data=csv_data,
+              file_name=f"COMPARATIVA_{f_sel}.csv",
               mime="text/csv",
           )
-        except Exception as ex_comp:
-          st.error(f"Error al procesar la comparación: {ex_comp}")
+        except Exception as err:
+          st.error(f"Error al procesar la comparación: {err}")
     else:
-      st.info("No se pudieron cargar los datos de la hoja matriz.")
+      st.info("No se pudo leer la hoja matriz.")
 
-  elif password_comp:
-    st.error("❌ Contraseña incorrecta.")
+  elif p_comp:
+    st.error("Contraseña incorrecta.")
   else:
-    st.info("🔑 Ingrese la contraseña (`Monica.1`) para desbloquear esta sección.")
+    st.info("🔑 Ingrese la contraseña `Monica.1`.")

@@ -178,25 +178,35 @@ with tab_comparativa:
         value="Reporte",
     )
 
-    df_matriz = None
+    df_matriz_procesado = None
     try:
       sheet_val = (
           int(hoja_matriz.strip())
           if hoja_matriz.strip().isdigit()
           else hoja_matriz.strip()
       )
-      df_matriz = conn.read(
-          spreadsheet=SPREADSHEET_URL, worksheet=sheet_val, ttl="0s"
+      # Leemos sin encabezado para controlar nosotros las filas exactas
+      df_raw = conn.read(
+          spreadsheet=SPREADSHEET_URL, worksheet=sheet_val, ttl="0s", header=None
       )
-    except Exception:
-      try:
-        df_matriz = conn.read(
-            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
-        )
-      except Exception as err:
-        st.error(f"No se pudo leer la hoja matriz: {err}")
+      
+      if df_raw is not None and not df_raw.empty:
+        # Buscamos la fila que contiene las fechas (ej. '2026-')
+        fila_fechas_idx = 0
+        for idx, row in df_raw.iterrows():
+          row_text = " ".join(row.dropna().astype(str))
+          if "2026-" in row_text:
+            fila_fechas_idx = idx
+            break
 
-    if df_matriz is not None and not df_matriz.empty:
+        # Tomamos esa fila como nombres de columnas y el resto como datos
+        headers = df_raw.iloc[fila_fechas_idx].values
+        df_matriz_procesado = df_raw.iloc[fila_fechas_idx + 1 :].copy()
+        df_matriz_procesado.columns = [str(h).strip() for h in headers]
+    except Exception as err:
+      st.error(f"No se pudo leer la hoja matriz: {err}")
+
+    if df_matriz_procesado is not None and not df_matriz_procesado.empty:
       fechas_disp = []
       if not df_concentrado.empty and "Fecha" in df_concentrado.columns:
         fechas_disp = sorted(
@@ -237,8 +247,8 @@ with tab_comparativa:
               "Territorio (Concentrado)",
           ]
 
-          # 2. Buscar la columna que contenga la fecha elegida (búsqueda flexible por texto parcial)
-          cols_matriz = [str(c).strip() for c in df_matriz.columns]
+          # 2. Buscar la columna que contenga la fecha elegida
+          cols_matriz = [str(c).strip() for c in df_matriz_procesado.columns]
           col_fecha_encontrada = None
           for col in cols_matriz:
             if fecha_elegida in col[:10]:
@@ -248,19 +258,13 @@ with tab_comparativa:
           if not col_fecha_encontrada:
             st.error(
                 f"❌ No se encontró la columna con la fecha '{fecha_elegida}' en"
-                " el Excel de Bienestar. Columnas detectadas:"
-                f" {cols_matriz[:8]}..."
+                " los encabezados de Bienestar."
             )
           else:
-            st.info(
-                f"📅 Columna encontrada en Excel Bienestar para **{fecha_elegida}**:"
-                f" `{col_fecha_encontrada}`"
-            )
-
             # Columna B (índice 1) para nombres de Servidores de la Nación
             col_nombre = cols_matriz[1] if len(cols_matriz) > 1 else cols_matriz[0]
 
-            df_m = df_matriz[[col_nombre, col_fecha_encontrada]].copy()
+            df_m = df_matriz_procesado[[col_nombre, col_fecha_encontrada]].copy()
             df_m.columns = ["Servidor_Bienestar", "Bienestar (Matriz)"]
             df_m["Servidor_Bienestar"] = (
                 df_m["Servidor_Bienestar"].astype(str).str.strip()

@@ -174,7 +174,7 @@ with tab_comparativa:
     st.success("Acceso concedido.")
 
     hoja_matriz = st.text_input(
-        "Nombre de la pestaña del Excel Matriz (Bienestar):",
+        "Nombre o número de la pestaña del Excel Matriz (ej. Reporte o 0):",
         value="Reporte",
     )
 
@@ -185,20 +185,29 @@ with tab_comparativa:
           if hoja_matriz.strip().isdigit()
           else hoja_matriz.strip()
       )
-      # Leemos sin encabezado para ubicar la Fila 3 exacta donde están las fechas
+      # Intento 1: Leer con el nombre que indicó el usuario
       df_raw = conn.read(
           spreadsheet=SPREADSHEET_URL, worksheet=sheet_val, ttl="0s", header=None
       )
+    except Exception:
+      # Intento 2 (Respaldo automático): Si falla, leer directamente la primera pestaña (0)
+      try:
+        df_raw = conn.read(
+            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s", header=None
+        )
+      except Exception as err:
+        st.error(f"No se pudo leer la hoja matriz de ninguna forma: {err}")
 
-      if df_raw is not None and not df_raw.empty:
+    if df_raw is not None and not df_raw.empty:
+      try:
         # Fila 3 en índice de Python es la fila 2 (0, 1, 2)
         fila_headers_idx = 2 if len(df_raw) > 2 else 0
         headers = df_raw.iloc[fila_headers_idx].values
 
         df_matriz_procesado = df_raw.iloc[fila_headers_idx + 1 :].copy()
         df_matriz_procesado.columns = [str(h).strip() for h in headers]
-    except Exception as err:
-      st.error(f"No se pudo leer la hoja matriz: {err}")
+      except Exception as e:
+        st.error(f"Error procesando la estructura de la tabla: {e}")
 
     if df_matriz_procesado is not None and not df_matriz_procesado.empty:
       fechas_disp = []

@@ -216,22 +216,39 @@ with tab_comparativa:
         value="Reporte",
     )
 
-    df_matriz = None
+    df_matriz_raw = None
     try:
-      df_matriz = conn.read(
+      df_matriz_raw = conn.read(
           spreadsheet=SPREADSHEET_URL,
           worksheet=hoja_matriz_input.strip(),
           ttl="0s",
+          header=None,  # Leer sin asumirlos como encabezado para encontrar la fila real
       )
     except Exception:
       try:
-        df_matriz = conn.read(
-            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
+        df_matriz_raw = conn.read(
+            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s", header=None
         )
       except Exception:
         pass
 
-    if df_matriz is not None and not df_matriz.empty:
+    if df_matriz_raw is not None and not df_matriz_raw.empty:
+      # Buscar la fila que contiene las columnas de fechas
+      hdr_idx = 0
+      for idx, row in df_matriz_raw.iterrows():
+        row_str = " ".join(row.dropna().astype(str))
+        if any(
+            d in row_str.lower()
+            for d in ["lunes", "martes", "miércoles", "miercoles", "jueves", "viernes", "sábado", "sabado", "domingo"]
+        ):
+          hdr_idx = idx
+          break
+
+      # Reestructurar la matriz usando la fila correcta como encabezado
+      headers = df_matriz_raw.iloc[hdr_idx].values
+      df_matriz = df_matriz_raw.iloc[hdr_idx + 1 :].copy()
+      df_matriz.columns = [str(h).strip() for h in headers]
+
       # Procesar y normalizar fechas del Concentrado
       df_c = df_concentrado.copy() if df_concentrado is not None else pd.DataFrame()
       fechas_disponibles = []
@@ -247,9 +264,25 @@ with tab_comparativa:
             reverse=True,
         )
 
-      # Identificar columnas de fechas en el segundo Excel (matriz)
-      cols_matriz = list(df_matriz.columns)
-      col_persona_matriz = cols_matriz[1] if len(cols_matriz) > 1 else cols_matriz[0]
+      cols_matriz = [c for c in df_matriz.columns if c and c.lower() != "nan"]
+      col_persona_matriz = cols_matriz[0]
+      for c in cols_matriz:
+        if "servidor" in c.lower() or "personal" in c.lower() or "nombre" in c.lower():
+          col_persona_matriz = c
+          break
+
+      cols_fechas_matriz = [
+          c
+          for c in cols_matriz
+          if c
+          not in [
+              col_persona_matriz,
+              "Dependencia",
+              "Visitas totales",
+              "Visitas del periodo",
+              "None",
+          ]
+      ]
 
       col_fecha_sel, col_matriz_sel = st.columns(2)
       with col_fecha_sel:
@@ -258,14 +291,13 @@ with tab_comparativa:
             options=fechas_disponibles if fechas_disponibles else ["Sin fechas"],
         )
       with col_matriz_sel:
-        cols_fechas_matriz = [c for c in cols_matriz if c not in [cols_matriz[0], col_persona_matriz, "Dependencia", "Visitas totales", "Visitas del periodo"]]
         col_columna_matriz = st.selectbox(
             "📊 Selecciona la columna del Día equivalente (Excel Matriz):",
             options=cols_fechas_matriz if cols_fechas_matriz else cols_matriz,
         )
 
       if st.button("🚀 Comparar Visitas Efectivas del Día", type="primary"):
-        # 1. Filtrar Concentrado por el día seleccionado
+        # 1. Filtrar Concentrado
         df_c_dia = df_c[df_c["Fecha"] == fecha_filtro].copy() if not df_c.empty else pd.DataFrame()
         df_c_grouped = (
             df_c_dia.groupby("Personal_Clean")["Visitas Efectivas"]
@@ -273,7 +305,7 @@ with tab_comparativa:
             .reset_index()
         )
 
-        # 2. Filtrar Matriz Horizontal por la columna del día elegida
+        # 2. Filtrar Matriz Horizontal
         df_m = df_matriz[[col_persona_matriz, col_columna_matriz]].copy()
         df_m.columns = ["Personal_Clean", "Efectivas_Matriz"]
         df_m["Personal_Clean"] = (
@@ -296,24 +328,33 @@ with tab_comparativa:
             df_cruse["Efectivas (Concentrado)"] - df_cruse["Efectivas (Matriz)"]
         )
 
-        # 4. Mostrar Gráficas lado a lado
+        # 4. Mostrar Gráficas
         st.markdown("---")
-        st.markdown(f"### 📊 Comparativa de Visitas Efectivas para el día: **{fecha_filtro}**")
+        st.markdown(
+            f"### 📊 Comparativa de Visitas Efectivas para el día: **{fecha_filtro}**"
+        )
 
         g1, g2 = st.columns(2)
         with g1:
           st.write("#### 📝 1. Concentrado Diario (Streamlit)")
           st.bar_chart(
-              df_cruse.set_index("Personal de Bienestar")["Efectivas (Concentrado)"]
+              df_cruse.set_index("Personal de Bienestar")[
+                  "Efectivas (Concentrado)"
+              ]
           )
-          st.metric("Total Efectivas Concentrado", int(df_cruse["Efectivas (Concentrado)"].sum()))
+          st.metric(
+              "Total Efectivas Concentrado",
+              int(df_cruse["Efectivas (Concentrado)"].sum()),
+          )
 
         with g2:
           st.write(f"#### 📄 2. Excel Matriz ({col_columna_matriz})")
           st.bar_chart(
               df_cruse.set_index("Personal de Bienestar")["Efectivas (Matriz)"]
           )
-          st.metric("Total Efectivas Matriz", int(df_cruse["Efectivas (Matriz)"].sum()))
+          st.metric(
+              "Total Efectivas Matriz", int(df_cruse["Efectivas (Matriz)"].sum())
+          )
 
         st.markdown("---")
         st.markdown("### 📋 Tabla Comparativa Detallada por Persona")

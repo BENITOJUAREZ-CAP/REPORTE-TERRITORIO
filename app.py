@@ -174,42 +174,30 @@ with tab_comparativa:
     st.success("Acceso concedido.")
 
     hoja_matriz = st.text_input(
-        "Nombre o número de la pestaña del Excel Matriz (ej. Reporte o 0):",
-        value="Reporte",
+        "Nombre de la pestaña o GID de la hoja Matriz:",
+        value="REPORTES",
     )
 
-    df_matriz_procesado = None
+    df_matriz = None
     try:
       sheet_val = (
           int(hoja_matriz.strip())
           if hoja_matriz.strip().isdigit()
           else hoja_matriz.strip()
       )
-      # Intento 1: Leer con el nombre que indicó el usuario
-      df_raw = conn.read(
-          spreadsheet=SPREADSHEET_URL, worksheet=sheet_val, ttl="0s", header=None
+      # Al estar limpio el Excel con cabecera en Fila 1, leemos directo
+      df_matriz = conn.read(
+          spreadsheet=SPREADSHEET_URL, worksheet=sheet_val, ttl="0s"
       )
     except Exception:
-      # Intento 2 (Respaldo automático): Si falla, leer directamente la primera pestaña (0)
       try:
-        df_raw = conn.read(
-            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s", header=None
+        df_matriz = conn.read(
+            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
         )
       except Exception as err:
-        st.error(f"No se pudo leer la hoja matriz de ninguna forma: {err}")
+        st.error(f"No se pudo leer la hoja matriz: {err}")
 
-    if df_raw is not None and not df_raw.empty:
-      try:
-        # Fila 3 en índice de Python es la fila 2 (0, 1, 2)
-        fila_headers_idx = 2 if len(df_raw) > 2 else 0
-        headers = df_raw.iloc[fila_headers_idx].values
-
-        df_matriz_procesado = df_raw.iloc[fila_headers_idx + 1 :].copy()
-        df_matriz_procesado.columns = [str(h).strip() for h in headers]
-      except Exception as e:
-        st.error(f"Error procesando la estructura de la tabla: {e}")
-
-    if df_matriz_procesado is not None and not df_matriz_procesado.empty:
+    if df_matriz is not None and not df_matriz.empty:
       fechas_disp = []
       if not df_concentrado.empty and "Fecha" in df_concentrado.columns:
         fechas_disp = sorted(
@@ -250,8 +238,8 @@ with tab_comparativa:
               "Territorio (Concentrado)",
           ]
 
-          # 2. Buscar la columna que coincida con la fecha elegida en los encabezados
-          cols_matriz = [str(c).strip() for c in df_matriz_procesado.columns]
+          # 2. Buscar la columna que coincida con la fecha elegida en la tabla limpia
+          cols_matriz = [str(c).strip() for c in df_matriz.columns]
           col_fecha_encontrada = None
           for col in cols_matriz:
             if fecha_elegida in col[:10]:
@@ -261,17 +249,13 @@ with tab_comparativa:
           if not col_fecha_encontrada:
             st.error(
                 f"❌ No se encontró la columna para la fecha '{fecha_elegida}' en"
-                f" la fila de fechas de Bienestar. Columnas disponibles: {cols_matriz[4:12]}"
+                f" el Excel de Bienestar. Columnas disponibles: {cols_matriz}"
             )
           else:
-            # Columna B (índice 1) para "Servidor de la Nación"
-            col_nombre = (
-                cols_matriz[1] if len(cols_matriz) > 1 else cols_matriz[0]
-            )
+            # Columna de nombres está en la Columna A (índice 0)
+            col_nombre = cols_matriz[0]
 
-            df_m = df_matriz_procesado[
-                [col_nombre, col_fecha_encontrada]
-            ].copy()
+            df_m = df_matriz[[col_nombre, col_fecha_encontrada]].copy()
             df_m.columns = ["Servidor_Bienestar", "Bienestar (Matriz)"]
             df_m["Servidor_Bienestar"] = (
                 df_m["Servidor_Bienestar"].astype(str).str.strip()
@@ -283,15 +267,11 @@ with tab_comparativa:
                 df_m["Bienestar (Matriz)"], errors="coerce"
             ).fillna(0)
 
-            # Filtrar filas vacías o nulas de nombres
+            # Filtrar filas vacías
             df_m = df_m[
                 (df_m["Key_Match"] != "")
                 & (df_m["Key_Match"] != "NAN")
-                & (
-                    ~df_m["Servidor_Bienestar"].str.contains(
-                        "Servidor de la Nación", case=False, na=False
-                    )
-                )
+                & (df_m["Servidor_Bienestar"] != "nan")
             ]
 
             # 3. Cruzar reportes
@@ -315,9 +295,9 @@ with tab_comparativa:
             df_final["Territorio (Concentrado)"] = df_final[
                 "Territorio (Concentrado)"
             ].astype(int)
-            df_final["Bienestar (Matriz)"] = df_final[
-                "Bienestar (Matriz)"
-            ].astype(int)
+            df_final["Bienestar (Matriz)"] = df_final["Bienestar (Matriz)"].astype(
+                int
+            )
             df_final["Diferencia"] = (
                 df_final["Territorio (Concentrado)"]
                 - df_final["Bienestar (Matriz)"]
@@ -330,8 +310,7 @@ with tab_comparativa:
             # 4. Mostrar Resultados y Gráficas Lado a Lado
             st.markdown("---")
             st.markdown(
-                f"### 📈 Comparativa de Visitas Efectivas para el día:"
-                f" **{fecha_elegida}**"
+                f"### 📈 Comparativa de Visitas Efectivas para el día: **{fecha_elegida}**"
             )
 
             g1, g2 = st.columns(2)

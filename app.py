@@ -179,16 +179,16 @@ with tab_comparativa:
   if p_comp == "Monica.1":
     st.success("Acceso concedido.")
 
-    df_matriz = None
+    # Lectura en bruto sin encabezados predeterminados para controlar la Fila 1 y Columna A
+    df_raw = None
     try:
-      df_matriz = conn.read(
-          spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
+      df_raw = conn.read(
+          spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s", header=None
       )
     except Exception as err:
       st.error(f"No se pudo leer la hoja matriz: {err}")
 
-    if df_matriz is not None and not df_matriz.empty:
-      # Obtener fechas seguras del concentrado o poner la fecha actual por defecto
+    if df_raw is not None and not df_raw.empty:
       fechas_disp = []
       if (
           not df_concentrado.empty
@@ -196,11 +196,13 @@ with tab_comparativa:
           and df_concentrado["Fecha"].notna().any()
       ):
         fechas_disp = sorted(
-            df_concentrado["Fecha"].dropna().astype(str).unique().tolist(),
+            df_concentrado["Fecha"].dropna().astype(str).str.unique().tolist(),
             reverse=True,
         )
       else:
-        fechas_disp = [datetime.now(ZoneInfo("America/Mexico_City")).strftime("%Y-%m-%d")]
+        fechas_disp = [
+            datetime.now(ZoneInfo("America/Mexico_City")).strftime("%Y-%m-%d")
+        ]
 
       fecha_elegida = st.selectbox(
           "📅 Selecciona la Fecha a comparar en ambos Exceles:",
@@ -244,24 +246,22 @@ with tab_comparativa:
                 ]
             )
 
-          # 2. Buscar la columna que coincida con la fecha elegida en la tabla de Bienestar
-          cols_matriz = [str(c).strip() for c in df_matriz.columns]
-          col_fecha_encontrada = None
-          for col in cols_matriz:
-            if fecha_elegida in col[:10]:
-              col_fecha_encontrada = col
+          # 2. Buscar la fecha exacta en la Fila 1 (fila 0 en Python)
+          fila_fechas = df_raw.iloc[0].astype(str).str.strip().tolist()
+          col_idx_encontrada = None
+          for idx, val in enumerate(fila_fechas):
+            if fecha_elegida in val[:10]:
+              col_idx_encontrada = idx
               break
 
-          if not col_fecha_encontrada:
+          if col_idx_encontrada is None:
             st.error(
-                f"❌ No se encontró la columna para la fecha '{fecha_elegida}' en"
-                f" el Excel de Bienestar. Columnas disponibles: {cols_matriz}"
+                f"❌ No se encontró la fecha '{fecha_elegida}' en la Fila 1 del"
+                f" Excel de Bienestar. Valores en Fila 1: {fila_fechas[:6]}"
             )
           else:
-            # Columna de nombres está en la Columna A (índice 0)
-            col_nombre = cols_matriz[0]
-
-            df_m = df_matriz[[col_nombre, col_fecha_encontrada]].copy()
+            # Extraer nombres de la Columna A (índice 0) y valores de la columna de la fecha
+            df_m = df_raw.iloc[1:, [0, col_idx_encontrada]].copy()
             df_m.columns = ["Servidor_Bienestar", "Bienestar (Matriz)"]
             df_m["Servidor_Bienestar"] = (
                 df_m["Servidor_Bienestar"].astype(str).str.strip()
@@ -273,7 +273,7 @@ with tab_comparativa:
                 df_m["Bienestar (Matriz)"], errors="coerce"
             ).fillna(0)
 
-            # Filtrar filas vacías
+            # Filtrar filas vacías o nombres inválidos
             df_m = df_m[
                 (df_m["Key_Match"] != "")
                 & (df_m["Key_Match"] != "NAN")
@@ -334,7 +334,8 @@ with tab_comparativa:
 
             with g2:
               st.write(
-                  f"#### 📄 2. Excel Bienestar ({col_fecha_encontrada})"
+                  f"#### 📄 2. Excel Bienestar (Columna"
+                  f" {col_idx_encontrada + 1})"
               )
               st.bar_chart(
                   df_final.set_index("Servidor de la Nación")[

@@ -22,7 +22,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 
 # ---------------------------------------------------------
-# Cargar Datos
+# Cargar Datos de Personal y Concentrado
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def cargar_personal():
@@ -222,34 +222,19 @@ with tab_comparativa:
           spreadsheet=SPREADSHEET_URL,
           worksheet=hoja_matriz_input.strip(),
           ttl="0s",
-          header=None,  # Leer sin asumirlos como encabezado para encontrar la fila real
       )
     except Exception:
       try:
         df_matriz_raw = conn.read(
-            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s", header=None
+            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
         )
       except Exception:
         pass
 
     if df_matriz_raw is not None and not df_matriz_raw.empty:
-      # Buscar la fila que contiene las columnas de fechas
-      hdr_idx = 0
-      for idx, row in df_matriz_raw.iterrows():
-        row_str = " ".join(row.dropna().astype(str))
-        if any(
-            d in row_str.lower()
-            for d in ["lunes", "martes", "miércoles", "miercoles", "jueves", "viernes", "sábado", "sabado", "domingo"]
-        ):
-          hdr_idx = idx
-          break
+      df_matriz = df_matriz_raw.copy()
 
-      # Reestructurar la matriz usando la fila correcta como encabezado
-      headers = df_matriz_raw.iloc[hdr_idx].values
-      df_matriz = df_matriz_raw.iloc[hdr_idx + 1 :].copy()
-      df_matriz.columns = [str(h).strip() for h in headers]
-
-      # Procesar y normalizar fechas del Concentrado
+      # Cargar fechas del Concentrado Diario
       df_c = df_concentrado.copy() if df_concentrado is not None else pd.DataFrame()
       fechas_disponibles = []
       if not df_c.empty and "Fecha" in df_c.columns:
@@ -264,24 +249,20 @@ with tab_comparativa:
             reverse=True,
         )
 
-      cols_matriz = [c for c in df_matriz.columns if c and c.lower() != "nan"]
+      cols_matriz = [str(c).strip() for c in df_matriz.columns if str(c).strip() and str(c).lower() != "nan"]
+      
+      # Identificar la columna del Servidor de la Nación (Columna B)
       col_persona_matriz = cols_matriz[0]
       for c in cols_matriz:
         if "servidor" in c.lower() or "personal" in c.lower() or "nombre" in c.lower():
           col_persona_matriz = c
           break
 
+      # Filtrar las columnas que corresponden a las fechas (excluyendo datos generales)
       cols_fechas_matriz = [
           c
           for c in cols_matriz
-          if c
-          not in [
-              col_persona_matriz,
-              "Dependencia",
-              "Visitas totales",
-              "Visitas del periodo",
-              "None",
-          ]
+          if c not in [col_persona_matriz, "Dependencia", "Visitas totales", "Visitas del periodo", "None"]
       ]
 
       col_fecha_sel, col_matriz_sel = st.columns(2)
@@ -292,12 +273,12 @@ with tab_comparativa:
         )
       with col_matriz_sel:
         col_columna_matriz = st.selectbox(
-            "📊 Selecciona la columna del Día equivalente (Excel Matriz):",
+            "📊 Selecciona el día equivalente (Excel Reporte):",
             options=cols_fechas_matriz if cols_fechas_matriz else cols_matriz,
         )
 
       if st.button("🚀 Comparar Visitas Efectivas del Día", type="primary"):
-        # 1. Filtrar Concentrado
+        # 1. Agrupar Concentrado
         df_c_dia = df_c[df_c["Fecha"] == fecha_filtro].copy() if not df_c.empty else pd.DataFrame()
         df_c_grouped = (
             df_c_dia.groupby("Personal_Clean")["Visitas Efectivas"]
@@ -305,7 +286,7 @@ with tab_comparativa:
             .reset_index()
         )
 
-        # 2. Filtrar Matriz Horizontal
+        # 2. Extraer datos del Excel Matriz
         df_m = df_matriz[[col_persona_matriz, col_columna_matriz]].copy()
         df_m.columns = ["Personal_Clean", "Efectivas_Matriz"]
         df_m["Personal_Clean"] = (
@@ -315,12 +296,12 @@ with tab_comparativa:
             df_m["Efectivas_Matriz"], errors="coerce"
         ).fillna(0)
 
-        # 3. Unir ambos datasets
+        # 3. Cruzar ambos reportes por Servidor de la Nación
         df_cruse = pd.merge(
             df_c_grouped, df_m, on="Personal_Clean", how="outer"
         ).fillna(0)
         df_cruse.columns = [
-            "Personal de Bienestar",
+            "Servidor de la Nación",
             "Efectivas (Concentrado)",
             "Efectivas (Matriz)",
         ]
@@ -328,7 +309,7 @@ with tab_comparativa:
             df_cruse["Efectivas (Concentrado)"] - df_cruse["Efectivas (Matriz)"]
         )
 
-        # 4. Mostrar Gráficas
+        # 4. Mostrar Gráficas Lado a Lado
         st.markdown("---")
         st.markdown(
             f"### 📊 Comparativa de Visitas Efectivas para el día: **{fecha_filtro}**"
@@ -338,7 +319,7 @@ with tab_comparativa:
         with g1:
           st.write("#### 📝 1. Concentrado Diario (Streamlit)")
           st.bar_chart(
-              df_cruse.set_index("Personal de Bienestar")[
+              df_cruse.set_index("Servidor de la Nación")[
                   "Efectivas (Concentrado)"
               ]
           )
@@ -348,19 +329,19 @@ with tab_comparativa:
           )
 
         with g2:
-          st.write(f"#### 📄 2. Excel Matriz ({col_columna_matriz})")
+          st.write(f"#### 📄 2. Excel Reporte ({col_columna_matriz})")
           st.bar_chart(
-              df_cruse.set_index("Personal de Bienestar")["Efectivas (Matriz)"]
+              df_cruse.set_index("Servidor de la Nación")["Efectivas (Matriz)"]
           )
           st.metric(
               "Total Efectivas Matriz", int(df_cruse["Efectivas (Matriz)"].sum())
           )
 
         st.markdown("---")
-        st.markdown("### 📋 Tabla Comparativa Detallada por Persona")
+        st.markdown("### 📋 Tabla Comparativa Detallada por Servidor de la Nación")
         st.dataframe(df_cruse, use_container_width=True)
 
-        # Botón de Descarga
+        # Botón para descargar el reporte comparativo en Excel/CSV
         csv_comp = df_cruse.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="📥 Descargar Comparativa del Día en Excel / CSV",

@@ -199,7 +199,7 @@ with tab_tabla:
 # TAB 3: COMPARATIVA DE VISITAS EFECTIVAS (PROTEGIDA)
 # ---------------------------------------------------------
 with tab_comparativa:
-  st.subheader("🔍 Comparativa y Generación de Reporte Cruzado")
+  st.subheader("🔍 Comparativa y Análisis de Visitas Efectivas")
 
   password_comp = st.text_input(
       "🔒 Ingrese la contraseña de acceso para la Comparativa:",
@@ -211,56 +211,62 @@ with tab_comparativa:
     st.success("🔓 Acceso concedido a la sección de Comparativa.")
 
     hoja_matriz = st.text_input(
-        "Nombre de la pestaña del reporte en matriz (ej. Reporte):",
+        "Nombre exacto de la pestaña del reporte horizontal:",
         value="Reporte",
     )
 
-    if st.button(
-        "🚀 Ejecutar Comparación y Generar Excel de Resultados", type="primary"
-    ):
+    if st.button("🚀 Ejecutar Análisis y Visualización", type="primary"):
       try:
+        # Intentar leer la hoja con manejo de errores detallado
         df_matriz = conn.read(
             spreadsheet=SPREADSHEET_URL, worksheet=hoja_matriz, ttl="0s"
         )
 
-        if df_matriz is not None and not df_matriz.empty and not df_concentrado.empty:
-          st.info(
-              "Procesando y cruzando información de Visitas Efectivas..."
-          )
+        if df_matriz is not None and not df_matriz.empty:
+          st.success("¡Datos del reporte horizontal leídos con éxito!")
+          st.write("### 📋 Vista Previa del Reporte Matriz")
+          st.dataframe(df_matriz.head(10), use_container_width=True)
 
-          # Procesar Concentrado de Reportes Diarios
-          df_c = df_concentrado.copy()
-          df_c["Personal_Clean"] = (
-              df_c["Personal de Bienestar"].astype(str).str.strip().str.upper()
-          )
-          df_c["Visitas Efectivas"] = pd.to_numeric(
-              df_c["Visitas Efectivas"], errors="coerce"
-          ).fillna(0)
+          if df_concentrado is not None and not df_concentrado.empty:
+            st.markdown("### 📈 Resumen de Visitas Efectivas")
+            df_c = df_concentrado.copy()
+            df_c["Personal_Clean"] = (
+                df_c["Personal de Bienestar"]
+                .astype(str)
+                .str.strip()
+                .str.upper()
+            )
+            df_c["Visitas Efectivas"] = pd.to_numeric(
+                df_c["Visitas Efectivas"], errors="coerce"
+            ).fillna(0)
 
-          # Mostrar métricas y gráficas resumen
-          st.markdown("### 📈 Resumen Gráfico de Comparación")
-          total_efectivas = int(df_c["Visitas Efectivas"].sum())
-          st.metric("Total Visitas Efectivas Registradas", total_efectivas)
+            total_efectivas = int(df_c["Visitas Efectivas"].sum())
+            st.metric(
+                "Total General de Visitas Efectivas (Concentrado)",
+                total_efectivas,
+            )
 
-          # Gráfico de barras por personal
-          df_grafica = (
-              df_c.groupby("Personal_Clean")["Visitas Efectivas"]
-              .sum()
-              .reset_index()
-          )
-          st.bar_chart(df_grafica.set_index("Personal_Clean"))
-
-          st.success(
-              "✅ ¡Datos procesados correctamente! Los resultados están listos"
-              " para exportación."
-          )
+            # Gráfica de barras por personal
+            df_grafica = (
+                df_c.groupby("Personal_Clean")["Visitas Efectivas"]
+                .sum()
+                .reset_index()
+            )
+            st.bar_chart(df_grafica.set_index("Personal_Clean"))
+          else:
+            st.info(
+                "El concentrado de reportes diarios está vacío actualmente."
+            )
         else:
           st.warning(
-              "Una de las fuentes de datos está vacía o el nombre de la pestaña"
-              " es incorrecto."
+              f"La pestaña '{hoja_matriz}' parece estar vacía o no se"
+              " reconoció correctamente."
           )
       except Exception as e:
-        st.error(f"Error al procesar la comparación: {e}")
+        st.error(
+            f"No se pudo leer la pestaña '{hoja_matriz}'. Verifica que el"
+            f" nombre esté bien escrito en Google Sheets. Detalle: {e}"
+        )
 
   elif password_comp:
     st.error("❌ Contraseña incorrecta.")

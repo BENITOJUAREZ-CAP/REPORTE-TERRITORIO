@@ -237,18 +237,19 @@ with tab_comparativa:
               "Territorio (Concentrado)",
           ]
 
-          # 2. Buscar la columna que coincida con la fecha elegida en los encabezados (Fila 1)
+          # 2. Buscar la columna que contenga la fecha elegida (búsqueda flexible por texto parcial)
           cols_matriz = [str(c).strip() for c in df_matriz.columns]
           col_fecha_encontrada = None
           for col in cols_matriz:
-            if fecha_elegida in col:
+            if fecha_elegida in col[:10]:
               col_fecha_encontrada = col
               break
 
           if not col_fecha_encontrada:
             st.error(
                 f"❌ No se encontró la columna con la fecha '{fecha_elegida}' en"
-                " la Fila 1 del Excel de Bienestar."
+                " el Excel de Bienestar. Columnas detectadas:"
+                f" {cols_matriz[:8]}..."
             )
           else:
             st.info(

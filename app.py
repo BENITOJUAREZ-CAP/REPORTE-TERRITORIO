@@ -20,22 +20,16 @@ HOJA_CONCENTRADO = "CONCENTRADO_DE_REPORTES_DIARIOS"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 
-# ---------------------------------------------------------
-# Función para normalizar nombres ignorando el orden
-# ---------------------------------------------------------
 def normalizar_palabras_nombre(nombre_str):
-  """Convierte un nombre en un conjunto de palabras clave ordenadas para comparar 'APELLIDOS NOMBRES' con 'NOMBRES APELLIDOS'."""
   if not nombre_str or pd.isna(nombre_str):
     return ""
   palabras = str(nombre_str).upper().strip().split()
-  # Filtramos palabras muy cortas o conectores como 'DE', 'DEL', 'LA'
-  palabras_filtradas = [p for p in palabras if p not in ["DE", "DEL", "LA", "LAS", "LOS", "Y"]]
+  palabras_filtradas = [
+      p for p in palabras if p not in ["DE", "DEL", "LA", "LAS", "LOS", "Y"]
+  ]
   return " ".join(sorted(palabras_filtradas))
 
 
-# ---------------------------------------------------------
-# Cargar Personal
-# ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def cargar_personal():
   try:
@@ -72,16 +66,12 @@ def obtener_concentrado():
 
 df_concentrado = obtener_concentrado()
 
-# Pestañas principales
 tab_form, tab_tabla, tab_comparativa = st.tabs([
     "📝 Capturar Reporte",
     "📊 Estadísticas y Acumulados",
     "🔍 Comparativa por Fecha y Servidor",
 ])
 
-# ---------------------------------------------------------
-# TAB 1: FORMULARIO DE CAPTURA
-# ---------------------------------------------------------
 with tab_form:
   st.subheader("Ingreso de Datos Diarios")
   tz_mexico = ZoneInfo("America/Mexico_City")
@@ -166,9 +156,6 @@ with tab_form:
         except Exception as e:
           st.error(f"Error al guardar: {e}")
 
-# ---------------------------------------------------------
-# TAB 2: ESTADÍSTICAS Y ACUMULADOS
-# ---------------------------------------------------------
 with tab_tabla:
   st.subheader("📊 Estadísticas y Acumulados")
   p_stat = st.text_input("🔒 Contraseña:", type="password", key="ps")
@@ -179,9 +166,6 @@ with tab_tabla:
   elif p_stat:
     st.error("Contraseña incorrecta.")
 
-# ---------------------------------------------------------
-# TAB 3: COMPARATIVA POR FECHA Y SERVIDOR (PROTEGIDA)
-# ---------------------------------------------------------
 with tab_comparativa:
   st.subheader("🔍 Comparativa Automática por Fecha y Servidor")
   p_comp = st.text_input("🔒 Contraseña para Comparativa:", type="password", key="pc")
@@ -208,7 +192,6 @@ with tab_comparativa:
         pass
 
     if df_matriz is not None and not df_matriz.empty:
-      # Fechas disponibles en el Concentrado de Territorio
       fechas_disp = []
       if not df_concentrado.empty and "Fecha" in df_concentrado.columns:
         fechas_disp = sorted(
@@ -225,30 +208,27 @@ with tab_comparativa:
 
       cols_matriz = [str(c).strip() for c in df_matriz.columns]
 
-      # Identificar automáticamente la columna de fecha en la Matriz
+      # Buscar coincidencia del día (ejemplo: '09' o '9' de 2026-10-09)
       partes_fecha = fecha_elegida.split("-") if "-" in fecha_elegida else []
       dia_num = str(int(partes_fecha[2])) if len(partes_fecha) == 3 else ""
 
       idx_fecha_def = 5 if len(cols_matriz) > 5 else 0
       for idx, col in enumerate(cols_matriz):
         col_lower = col.lower()
-        if dia_num and (f" {dia_num} " in f" {col_lower} " or col_lower.startswith(f"{dia_num} ") or col_lower.endswith(f" {dia_num}")):
+        if dia_num and (f" {dia_num} " in f" {col_lower} " or col_lower.startswith(f"{dia_num} ") or col_lower.endswith(f" {dia_num}") or f", {dia_num} " in col_lower):
           idx_fecha_def = idx
           break
 
       with col_f2:
         idx_col_matriz = st.selectbox(
-            "📊 Columna detectada en Excel Bienestar:",
+            "📊 Selecciona/Verifica la columna en Excel Bienestar:",
             options=range(len(cols_matriz)),
             format_func=lambda i: f"Columna {i+1}: {cols_matriz[i]}",
             index=idx_fecha_def,
         )
 
-      if st.button(
-          "🚀 Comparar Servidores de la Nación", type="primary"
-      ):
+      if st.button("🚀 Comparar Servidores de la Nación", type="primary"):
         try:
-          # 1. Concentrado de Territorio (APELLIDOS NOMBRES)
           df_c = df_concentrado.copy()
           df_c["Servidor_Original"] = df_c["Personal de Bienestar"].astype(str).str.strip()
           df_c["Key_Match"] = df_c["Servidor_Original"].apply(normalizar_palabras_nombre)
@@ -264,7 +244,6 @@ with tab_comparativa:
           )
           df_c_grouped.columns = ["Key_Match", "Servidor_Territorio", "Territorio (Concentrado)"]
 
-          # 2. Excel Matriz Bienestar (NOMBRES APELLIDOS)
           idx_servidor = 1 if len(cols_matriz) > 1 else 0
           df_m = df_matriz.iloc[:, [idx_servidor, idx_col_matriz]].copy()
           df_m.columns = ["Servidor_Bienestar", "Bienestar (Matriz)"]
@@ -274,20 +253,16 @@ with tab_comparativa:
               df_m["Bienestar (Matriz)"], errors="coerce"
           ).fillna(0)
 
-          # Filtrar filas vacías
           df_m = df_m[df_m["Key_Match"] != ""]
 
-          # 3. Cruzar ambos DataFrames mediante la clave de palabras ("Key_Match")
           df_final = pd.merge(
               df_c_grouped, df_m, on="Key_Match", how="outer"
           ).fillna(0)
 
-          # Definir el nombre a mostrar (si existe en Territorio, usarlo; de lo contrario usar el de Bienestar)
           df_final["Servidor de la Nación"] = df_final["Servidor_Territorio"].where(
               df_final["Servidor_Territorio"] != 0, df_final["Servidor_Bienestar"]
           )
 
-          # Seleccionar columnas limpias
           df_final = df_final[[
               "Servidor de la Nación",
               "Territorio (Concentrado)",
@@ -301,22 +276,16 @@ with tab_comparativa:
               - df_final["Bienestar (Matriz)"]
           )
 
-          # Ordenar por nombre
           df_final = df_final.sort_values(by="Servidor de la Nación").reset_index(drop=True)
 
-          # 4. Mostrar Resultados y Gráficas
           st.markdown("---")
-          st.markdown(
-              f"### 📈 Comparativa de Visitas Efectivas para el día: **{fecha_elegida}**"
-          )
+          st.markdown(f"### 📈 Comparativa de Visitas Efectivas para el día: **{fecha_elegida}**")
 
           g1, g2 = st.columns(2)
           with g1:
             st.write("#### 📝 1. Excel Territorio (Concentrado)")
             st.bar_chart(
-                df_final.set_index("Servidor de la Nación")[
-                    "Territorio (Concentrado)"
-                ]
+                df_final.set_index("Servidor de la Nación")["Territorio (Concentrado)"]
             )
             st.metric(
                 "Total Territorio",
@@ -324,13 +293,9 @@ with tab_comparativa:
             )
 
           with g2:
-            st.write(
-                f"#### 📄 2. Excel Bienestar ({cols_matriz[idx_col_matriz]})"
-            )
+            st.write(f"#### 📄 2. Excel Bienestar ({cols_matriz[idx_col_matriz]})")
             st.bar_chart(
-                df_final.set_index("Servidor de la Nación")[
-                    "Bienestar (Matriz)"
-                ]
+                df_final.set_index("Servidor de la Nación")["Bienestar (Matriz)"]
             )
             st.metric(
                 "Total Bienestar", int(df_final["Bienestar (Matriz)"].sum())
@@ -340,7 +305,6 @@ with tab_comparativa:
           st.markdown("### 📋 Tabla Comparativa por Servidor de la Nación")
           st.dataframe(df_final, use_container_width=True)
 
-          # Descargar CSV
           csv_data = df_final.to_csv(index=False).encode("utf-8")
           st.download_button(
               label="📥 Descargar Reporte Comparativo (CSV)",

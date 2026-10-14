@@ -179,7 +179,6 @@ with tab_comparativa:
     )
 
     df_matriz = None
-    # Intento 1: Leer el nombre escrito por el usuario
     try:
       sheet_val = (
           int(hoja_matriz.strip())
@@ -190,13 +189,12 @@ with tab_comparativa:
           spreadsheet=SPREADSHEET_URL, worksheet=sheet_val, ttl="0s"
       )
     except Exception:
-      # Intento 2 (Respaldo automático): Si falla, leer directamente la primera pestaña (0)
       try:
         df_matriz = conn.read(
             spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
         )
       except Exception as err:
-        st.error(f"No se pudo leer la hoja matriz de ninguna forma: {err}")
+        st.error(f"No se pudo leer la hoja matriz: {err}")
 
     if df_matriz is not None and not df_matriz.empty:
       fechas_disp = []
@@ -206,24 +204,21 @@ with tab_comparativa:
             reverse=True,
         )
 
+      cols = list(df_matriz.columns)
+
       col_a1, col_a2 = st.columns(2)
       with col_a1:
         fecha_elegida = st.selectbox(
-            "1. Fecha a comparar:",
+            "1. Fecha a comparar (Territorio):",
             options=fechas_disp if fechas_disp else ["Sin fechas"],
         )
       with col_a2:
-        cols_matriz = [str(c).strip() for c in df_matriz.columns]
-        idx_default = 0
-        for idx, col in enumerate(cols_matriz):
-          if fecha_elegida in col:
-            idx_default = idx
-            break
-
-        columna_fecha_matriz = st.selectbox(
-            "2. Columna del día en Excel Bienestar:",
-            options=cols_matriz,
-            index=min(idx_default, len(cols_matriz) - 1),
+        # Selector por posición numérica de columna (ej. Columna F = índice 5)
+        idx_col_matriz = st.selectbox(
+            "2. Selecciona la Columna del Día en Bienestar:",
+            options=range(len(cols)),
+            format_func=lambda i: f"Columna {i+1} ({cols[i]})",
+            index=min(5, len(cols) - 1),  # Por defecto apunta a la columna F aprox.
         )
 
       if st.button("🚀 Generar Comparativa", type="primary"):
@@ -254,13 +249,11 @@ with tab_comparativa:
               "Territorio (Concentrado)",
           ]
 
-          # 2. Excel Matriz Bienestar
-          col_nombre = (
-              df_matriz.columns[1]
-              if len(df_matriz.columns) > 1
-              else df_matriz.columns[0]
-          )
-          df_m = df_matriz[[col_nombre, columna_fecha_matriz]].copy()
+          # 2. Excel Matriz Bienestar por posición de columna exacta
+          col_nombre = cols[1] if len(cols) > 1 else cols[0]
+          col_fecha_seleccionada = cols[idx_col_matriz]
+
+          df_m = df_matriz[[col_nombre, col_fecha_seleccionada]].copy()
           df_m.columns = ["Servidor_Bienestar", "Bienestar (Matriz)"]
           df_m["Servidor_Bienestar"] = (
               df_m["Servidor_Bienestar"].astype(str).str.strip()
@@ -327,7 +320,9 @@ with tab_comparativa:
             )
 
           with g2:
-            st.write(f"#### 📄 2. Excel Bienestar ({columna_fecha_matriz})")
+            st.write(
+                f"#### 📄 2. Excel Bienestar ({col_fecha_seleccionada})"
+            )
             st.bar_chart(
                 df_final.set_index("Servidor de la Nación")[
                     "Bienestar (Matriz)"

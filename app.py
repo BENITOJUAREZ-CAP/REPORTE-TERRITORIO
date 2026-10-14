@@ -167,61 +167,26 @@ with tab_tabla:
     st.error("Contraseña incorrecta.")
 
 with tab_comparativa:
-  st.subheader("🔍 Comparativa Automática por Fecha y Servidor")
+  st.subheader("🔍 Comparativa Manual y Directa por Fecha")
   p_comp = st.text_input("🔒 Contraseña para Comparativa:", type="password", key="pc")
 
   if p_comp == "Monica.1":
     st.success("Acceso concedido.")
 
     hoja_matriz = st.text_input(
-        "Nombre exacto de la pestaña del Excel Matriz (Bienestar):",
+        "Nombre de la pestaña del Excel Matriz (Bienestar):",
         value="Reporte",
     )
 
-    df_raw = None
+    df_matriz = None
     try:
-      # Leer sin encabezado para ubicar la fila exacta de los días y nombres
-      df_raw = conn.read(
-          spreadsheet=SPREADSHEET_URL,
-          worksheet=hoja_matriz.strip(),
-          ttl="0s",
-          header=None,
+      df_matriz = conn.read(
+          spreadsheet=SPREADSHEET_URL, worksheet=hoja_matriz.strip(), ttl="0s"
       )
-    except Exception:
-      try:
-        df_raw = conn.read(
-            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s", header=None
-        )
-      except Exception:
-        pass
+    except Exception as e:
+      st.error(f"No se pudo leer la pestaña '{hoja_matriz}': {e}")
 
-    if df_raw is not None and not df_raw.empty:
-      # Buscar automáticamente la fila que contiene las fechas/días (ej. 'oct', 'lunes', 'martes')
-      fila_encabezados = 0
-      for idx, row in df_raw.iterrows():
-        row_str = " ".join(row.dropna().astype(str)).lower()
-        if any(
-            d in row_str
-            for d in [
-                "oct",
-                "sep",
-                "nov",
-                "lunes",
-                "martes",
-                "miércoles",
-                "miercoles",
-                "jueves",
-                "viernes",
-            ]
-        ):
-          fila_encabezados = idx
-          break
-
-      # Extraer los títulos de las columnas de esa fila
-      headers = df_raw.iloc[fila_encabezados].values
-      df_matriz = df_raw.iloc[fila_encabezados + 1 :].copy()
-      df_matriz.columns = [str(h).strip() for h in headers]
-
+    if df_matriz is not None and not df_matriz.empty:
       fechas_disp = []
       if not df_concentrado.empty and "Fecha" in df_concentrado.columns:
         fechas_disp = sorted(
@@ -229,34 +194,20 @@ with tab_comparativa:
             reverse=True,
         )
 
-      col_f1, col_f2 = st.columns(2)
-      with col_f1:
+      col_a1, col_a2 = st.columns(2)
+      with col_a1:
         fecha_elegida = st.selectbox(
-            "📅 Selecciona la Fecha a comparar:",
+            "1. Fecha en Concentrado (Territorio):",
             options=fechas_disp if fechas_disp else ["Sin fechas"],
         )
-
-      cols_matriz = [str(c).strip() for c in df_matriz.columns if str(c).strip() and str(c).lower() != "nan"]
-
-      # Intentar detectar automáticamente la columna del día
-      partes_fecha = fecha_elegida.split("-") if "-" in fecha_elegida else []
-      dia_num = str(int(partes_fecha[2])) if len(partes_fecha) == 3 else ""
-
-      idx_fecha_def = 0
-      for idx, col in enumerate(cols_matriz):
-        col_lower = col.lower()
-        if dia_num and (dia_num in col_lower):
-          idx_fecha_def = idx
-          break
-
-      with col_f2:
-        col_elegida_matriz = st.selectbox(
-            "📊 Selecciona el Día en Excel Bienestar:",
-            options=cols_matriz,
-            index=min(idx_fecha_def, len(cols_matriz) - 1),
+      with col_a2:
+        nombre_columna_dia = st.text_input(
+            "2. Escribe el nombre exacto de la columna del día en Bienestar:",
+            value="Miércoles, 14 de oct",
+            help="Ejemplo: Miércoles, 14 de oct o Martes, 13 de oct",
         )
 
-      if st.button("🚀 Comparar Servidores de la Nación", type="primary"):
+      if st.button("🚀 Generar Comparativa", type="primary"):
         try:
           # 1. Concentrado de Territorio
           df_c = df_concentrado.copy()
@@ -285,106 +236,104 @@ with tab_comparativa:
           ]
 
           # 2. Excel Matriz Bienestar
-          # Buscar la columna que contiene los nombres (Servidor de la Nación, normalmente Columna B / índice 1)
-          col_nombre_matriz = cols_matriz[0]
-          for c in cols_matriz:
-            if any(
-                k in c.lower()
-                for k in ["servidor", "nombre", "personal", "nación"]
-            ):
-              col_nombre_matriz = c
-              break
-
-          df_m = df_matriz[[col_nombre_matriz, col_elegida_matriz]].copy()
-          df_m.columns = ["Servidor_Bienestar", "Bienestar (Matriz)"]
-          df_m["Servidor_Bienestar"] = (
-              df_m["Servidor_Bienestar"].astype(str).str.strip()
-          )
-          df_m["Key_Match"] = df_m["Servidor_Bienestar"].apply(
-              normalizar_palabras_nombre
-          )
-          df_m["Bienestar (Matriz)"] = pd.to_numeric(
-              df_m["Bienestar (Matriz)"], errors="coerce"
-          ).fillna(0)
-
-          df_m = df_m[df_m["Key_Match"] != ""]
-
-          # 3. Cruzar reportes
-          df_final = pd.merge(
-              df_c_grouped, df_m, on="Key_Match", how="outer"
-          ).fillna(0)
-
-          df_final["Servidor de la Nación"] = df_final[
-              "Servidor_Territorio"
-          ].where(df_final["Servidor_Territorio"] != 0, df_final["Servidor_Bienestar"])
-
-          df_final = df_final[[
-              "Servidor de la Nación",
-              "Territorio (Concentrado)",
-              "Bienestar (Matriz)",
-          ]].copy()
-
-          df_final["Territorio (Concentrado)"] = df_final[
-              "Territorio (Concentrado)"
-          ].astype(int)
-          df_final["Bienestar (Matriz)"] = df_final["Bienestar (Matriz)"].astype(
-              int
-          )
-          df_final["Diferencia"] = (
-              df_final["Territorio (Concentrado)"]
-              - df_final["Bienestar (Matriz)"]
-          )
-
-          df_final = df_final.sort_values(
-              by="Servidor de la Nación"
-          ).reset_index(drop=True)
-
-          # 4. Mostrar Resultados y Gráficas Lado a Lado
-          st.markdown("---")
-          st.markdown(
-              f"### 📈 Comparativa de Visitas Efectivas para el día: **{fecha_elegida}**"
-          )
-
-          g1, g2 = st.columns(2)
-          with g1:
-            st.write("#### 📝 1. Excel Territorio (Concentrado)")
-            st.bar_chart(
-                df_final.set_index("Servidor de la Nación")[
-                    "Territorio (Concentrado)"
-                ]
+          # La columna de nombres es la B (índice 1) y la del día es la que escribió
+          if nombre_columna_dia not in df_matriz.columns:
+            st.error(
+                f"❌ La columna '{nombre_columna_dia}' no existe en la hoja"
+                " Matriz. Revisa las mayúsculas, comas y acentos."
             )
-            st.metric(
-                "Total Territorio",
-                int(df_final["Territorio (Concentrado)"].sum()),
+          else:
+            col_nombre = df_matriz.columns[1] if len(df_matriz.columns) > 1 else df_matriz.columns[0]
+            df_m = df_matriz[[col_nombre, nombre_columna_dia]].copy()
+            df_m.columns = ["Servidor_Bienestar", "Bienestar (Matriz)"]
+            df_m["Servidor_Bienestar"] = (
+                df_m["Servidor_Bienestar"].astype(str).str.strip()
+            )
+            df_m["Key_Match"] = df_m["Servidor_Bienestar"].apply(
+                normalizar_palabras_nombre
+            )
+            df_m["Bienestar (Matriz)"] = pd.to_numeric(
+                df_m["Bienestar (Matriz)"], errors="coerce"
+            ).fillna(0)
+
+            df_m = df_m[df_m["Key_Match"] != ""]
+
+            # 3. Cruzar reportes
+            df_final = pd.merge(
+                df_c_grouped, df_m, on="Key_Match", how="outer"
+            ).fillna(0)
+
+            df_final["Servidor de la Nación"] = df_final[
+                "Servidor_Territorio"
+            ].where(df_final["Servidor_Territorio"] != 0, df_final["Servidor_Bienestar"])
+
+            df_final = df_final[[
+                "Servidor de la Nación",
+                "Territorio (Concentrado)",
+                "Bienestar (Matriz)",
+            ]].copy()
+
+            df_final["Territorio (Concentrado)"] = df_final[
+                "Territorio (Concentrado)"
+            ].astype(int)
+            df_final["Bienestar (Matriz)"] = df_final["Bienestar (Matriz)"].astype(
+                int
+            )
+            df_final["Diferencia"] = (
+                df_final["Territorio (Concentrado)"]
+                - df_final["Bienestar (Matriz)"]
             )
 
-          with g2:
-            st.write(f"#### 📄 2. Excel Bienestar ({col_elegida_matriz})")
-            st.bar_chart(
-                df_final.set_index("Servidor de la Nación")[
-                    "Bienestar (Matriz)"
-                ]
-            )
-            st.metric(
-                "Total Bienestar", int(df_final["Bienestar (Matriz)"].sum())
+            df_final = df_final.sort_values(
+                by="Servidor de la Nación"
+            ).reset_index(drop=True)
+
+            # 4. Mostrar Resultados y Gráficas Lado a Lado
+            st.markdown("---")
+            st.markdown(
+                f"### 📈 Comparativa de Visitas Efectivas para el día: **{fecha_elegida}**"
             )
 
-          st.markdown("---")
-          st.markdown("### 📋 Tabla Comparativa por Servidor de la Nación")
-          st.dataframe(df_final, use_container_width=True)
+            g1, g2 = st.columns(2)
+            with g1:
+              st.write("#### 📝 1. Excel Territorio (Concentrado)")
+              st.bar_chart(
+                  df_final.set_index("Servidor de la Nación")[
+                      "Territorio (Concentrado)"
+                  ]
+              )
+              st.metric(
+                  "Total Territorio",
+                  int(df_final["Territorio (Concentrado)"].sum()),
+              )
 
-          # Descarga CSV
-          csv_data = df_final.to_csv(index=False).encode("utf-8")
-          st.download_button(
-              label="📥 Descargar Reporte Comparativo (CSV)",
-              data=csv_data,
-              file_name=f"COMPARATIVA_{fecha_elegida}.csv",
-              mime="text/csv",
-          )
+            with g2:
+              st.write(f"#### 📄 2. Excel Bienestar ({nombre_columna_dia})")
+              st.bar_chart(
+                  df_final.set_index("Servidor de la Nación")[
+                      "Bienestar (Matriz)"
+                  ]
+              )
+              st.metric(
+                  "Total Bienestar", int(df_final["Bienestar (Matriz)"].sum())
+              )
+
+            st.markdown("---")
+            st.markdown("### 📋 Tabla Comparativa por Servidor de la Nación")
+            st.dataframe(df_final, use_container_width=True)
+
+            # Descarga CSV
+            csv_data = df_final.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📥 Descargar Reporte Comparativo (CSV)",
+                data=csv_data,
+                file_name=f"COMPARATIVA_{fecha_elegida}.csv",
+                mime="text/csv",
+            )
         except Exception as err:
           st.error(f"Error al procesar la comparación: {err}")
     else:
-      st.info("No se pudo leer la hoja matriz.")
+      st.info("No se pudieron cargar los datos de la hoja matriz.")
 
   elif p_comp:
     st.error("Contraseña incorrecta.")

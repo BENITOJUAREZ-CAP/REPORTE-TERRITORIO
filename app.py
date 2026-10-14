@@ -174,7 +174,7 @@ with tab_comparativa:
     st.success("Acceso concedido.")
 
     hoja_matriz = st.text_input(
-        "Nombre o número de la pestaña del Excel Matriz (ej. Reporte o 0):",
+        "Nombre de la pestaña del Excel Matriz (Bienestar):",
         value="Reporte",
     )
 
@@ -185,23 +185,17 @@ with tab_comparativa:
           if hoja_matriz.strip().isdigit()
           else hoja_matriz.strip()
       )
-      # Leemos sin encabezado para controlar nosotros las filas exactas
+      # Leemos sin encabezado para ubicar la Fila 3 exacta donde están las fechas
       df_raw = conn.read(
           spreadsheet=SPREADSHEET_URL, worksheet=sheet_val, ttl="0s", header=None
       )
-      
-      if df_raw is not None and not df_raw.empty:
-        # Buscamos la fila que contiene las fechas (ej. '2026-')
-        fila_fechas_idx = 0
-        for idx, row in df_raw.iterrows():
-          row_text = " ".join(row.dropna().astype(str))
-          if "2026-" in row_text:
-            fila_fechas_idx = idx
-            break
 
-        # Tomamos esa fila como nombres de columnas y el resto como datos
-        headers = df_raw.iloc[fila_fechas_idx].values
-        df_matriz_procesado = df_raw.iloc[fila_fechas_idx + 1 :].copy()
+      if df_raw is not None and not df_raw.empty:
+        # Fila 3 en índice de Python es la fila 2 (0, 1, 2)
+        fila_headers_idx = 2 if len(df_raw) > 2 else 0
+        headers = df_raw.iloc[fila_headers_idx].values
+
+        df_matriz_procesado = df_raw.iloc[fila_headers_idx + 1 :].copy()
         df_matriz_procesado.columns = [str(h).strip() for h in headers]
     except Exception as err:
       st.error(f"No se pudo leer la hoja matriz: {err}")
@@ -215,11 +209,11 @@ with tab_comparativa:
         )
 
       fecha_elegida = st.selectbox(
-          "📅 Selecciona la Fecha a buscar y comparar en ambos Exceles:",
+          "📅 Selecciona la Fecha a comparar en ambos Exceles:",
           options=fechas_disp if fechas_disp else ["Sin fechas"],
       )
 
-      if st.button("🚀 Buscar Fecha y Comparar", type="primary"):
+      if st.button("🚀 Generar Comparativa", type="primary"):
         try:
           # 1. Concentrado de Territorio
           df_c = df_concentrado.copy()
@@ -247,7 +241,7 @@ with tab_comparativa:
               "Territorio (Concentrado)",
           ]
 
-          # 2. Buscar la columna que contenga la fecha elegida
+          # 2. Buscar la columna que coincida con la fecha elegida en los encabezados
           cols_matriz = [str(c).strip() for c in df_matriz_procesado.columns]
           col_fecha_encontrada = None
           for col in cols_matriz:
@@ -257,14 +251,18 @@ with tab_comparativa:
 
           if not col_fecha_encontrada:
             st.error(
-                f"❌ No se encontró la columna con la fecha '{fecha_elegida}' en"
-                " los encabezados de Bienestar."
+                f"❌ No se encontró la columna para la fecha '{fecha_elegida}' en"
+                f" la fila de fechas de Bienestar. Columnas disponibles: {cols_matriz[4:12]}"
             )
           else:
-            # Columna B (índice 1) para nombres de Servidores de la Nación
-            col_nombre = cols_matriz[1] if len(cols_matriz) > 1 else cols_matriz[0]
+            # Columna B (índice 1) para "Servidor de la Nación"
+            col_nombre = (
+                cols_matriz[1] if len(cols_matriz) > 1 else cols_matriz[0]
+            )
 
-            df_m = df_matriz_procesado[[col_nombre, col_fecha_encontrada]].copy()
+            df_m = df_matriz_procesado[
+                [col_nombre, col_fecha_encontrada]
+            ].copy()
             df_m.columns = ["Servidor_Bienestar", "Bienestar (Matriz)"]
             df_m["Servidor_Bienestar"] = (
                 df_m["Servidor_Bienestar"].astype(str).str.strip()
@@ -276,7 +274,16 @@ with tab_comparativa:
                 df_m["Bienestar (Matriz)"], errors="coerce"
             ).fillna(0)
 
-            df_m = df_m[df_m["Key_Match"] != ""]
+            # Filtrar filas vacías o nulas de nombres
+            df_m = df_m[
+                (df_m["Key_Match"] != "")
+                & (df_m["Key_Match"] != "NAN")
+                & (
+                    ~df_m["Servidor_Bienestar"].str.contains(
+                        "Servidor de la Nación", case=False, na=False
+                    )
+                )
+            ]
 
             # 3. Cruzar reportes
             df_final = pd.merge(
@@ -299,9 +306,9 @@ with tab_comparativa:
             df_final["Territorio (Concentrado)"] = df_final[
                 "Territorio (Concentrado)"
             ].astype(int)
-            df_final["Bienestar (Matriz)"] = df_final["Bienestar (Matriz)"].astype(
-                int
-            )
+            df_final["Bienestar (Matriz)"] = df_final[
+                "Bienestar (Matriz)"
+            ].astype(int)
             df_final["Diferencia"] = (
                 df_final["Territorio (Concentrado)"]
                 - df_final["Bienestar (Matriz)"]
@@ -314,7 +321,8 @@ with tab_comparativa:
             # 4. Mostrar Resultados y Gráficas Lado a Lado
             st.markdown("---")
             st.markdown(
-                f"### 📈 Comparativa de Visitas Efectivas para el día: **{fecha_elegida}**"
+                f"### 📈 Comparativa de Visitas Efectivas para el día:"
+                f" **{fecha_elegida}**"
             )
 
             g1, g2 = st.columns(2)

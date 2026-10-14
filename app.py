@@ -174,17 +174,29 @@ with tab_comparativa:
     st.success("Acceso concedido.")
 
     hoja_matriz = st.text_input(
-        "Nombre de la pestaña del Excel Matriz (Bienestar):",
+        "Nombre o número de la pestaña del Excel Matriz (ej. Reporte o 0):",
         value="Reporte",
     )
 
     df_matriz = None
+    # Intento 1: Leer tal como lo escribió
     try:
-      df_matriz = conn.read(
-          spreadsheet=SPREADSHEET_URL, worksheet=hoja_matriz.strip(), ttl="0s"
+      sheet_val = (
+          int(hoja_matriz.strip())
+          if hoja_matriz.strip().isdigit()
+          else hoja_matriz.strip()
       )
-    except Exception as e:
-      st.error(f"No se pudo leer la pestaña '{hoja_matriz}': {e}")
+      df_matriz = conn.read(
+          spreadsheet=SPREADSHEET_URL, worksheet=sheet_val, ttl="0s"
+      )
+    except Exception:
+      # Intento 2: Si falla, leer directamente la primera pestaña (0) del documento
+      try:
+        df_matriz = conn.read(
+            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
+        )
+      except Exception as err:
+        st.error(f"No se pudo leer el archivo de Excel: {err}")
 
     if df_matriz is not None and not df_matriz.empty:
       fechas_disp = []
@@ -236,14 +248,18 @@ with tab_comparativa:
           ]
 
           # 2. Excel Matriz Bienestar
-          # La columna de nombres es la B (índice 1) y la del día es la que escribió
           if nombre_columna_dia not in df_matriz.columns:
             st.error(
                 f"❌ La columna '{nombre_columna_dia}' no existe en la hoja"
-                " Matriz. Revisa las mayúsculas, comas y acentos."
+                " Matriz. Columnas disponibles:"
+                f" {list(df_matriz.columns)}"
             )
           else:
-            col_nombre = df_matriz.columns[1] if len(df_matriz.columns) > 1 else df_matriz.columns[0]
+            col_nombre = (
+                df_matriz.columns[1]
+                if len(df_matriz.columns) > 1
+                else df_matriz.columns[0]
+            )
             df_m = df_matriz[[col_nombre, nombre_columna_dia]].copy()
             df_m.columns = ["Servidor_Bienestar", "Bienestar (Matriz)"]
             df_m["Servidor_Bienestar"] = (
@@ -265,7 +281,10 @@ with tab_comparativa:
 
             df_final["Servidor de la Nación"] = df_final[
                 "Servidor_Territorio"
-            ].where(df_final["Servidor_Territorio"] != 0, df_final["Servidor_Bienestar"])
+            ].where(
+                df_final["Servidor_Territorio"] != 0,
+                df_final["Servidor_Bienestar"],
+            )
 
             df_final = df_final[[
                 "Servidor de la Nación",

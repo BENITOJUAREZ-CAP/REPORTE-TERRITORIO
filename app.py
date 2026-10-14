@@ -174,17 +174,29 @@ with tab_comparativa:
     st.success("Acceso concedido.")
 
     hoja_matriz = st.text_input(
-        "Nombre de la pestaña del Excel Matriz (Bienestar):",
+        "Nombre o número de la pestaña del Excel Matriz (ej. Reporte o 0):",
         value="Reporte",
     )
 
     df_matriz = None
+    # Intento 1: Leer el nombre escrito por el usuario
     try:
-      df_matriz = conn.read(
-          spreadsheet=SPREADSHEET_URL, worksheet=hoja_matriz.strip(), ttl="0s"
+      sheet_val = (
+          int(hoja_matriz.strip())
+          if hoja_matriz.strip().isdigit()
+          else hoja_matriz.strip()
       )
-    except Exception as e:
-      st.error(f"No se pudo leer la pestaña '{hoja_matriz}': {e}")
+      df_matriz = conn.read(
+          spreadsheet=SPREADSHEET_URL, worksheet=sheet_val, ttl="0s"
+      )
+    except Exception:
+      # Intento 2 (Respaldo automático): Si falla, leer directamente la primera pestaña (0)
+      try:
+        df_matriz = conn.read(
+            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
+        )
+      except Exception as err:
+        st.error(f"No se pudo leer la hoja matriz de ninguna forma: {err}")
 
     if df_matriz is not None and not df_matriz.empty:
       fechas_disp = []
@@ -201,10 +213,7 @@ with tab_comparativa:
             options=fechas_disp if fechas_disp else ["Sin fechas"],
         )
       with col_a2:
-        # Limpiar y convertir nombres de columnas de la matriz a string estándar
         cols_matriz = [str(c).strip() for c in df_matriz.columns]
-        
-        # Seleccionar por defecto la columna que coincida exactamente con la fecha elegida
         idx_default = 0
         for idx, col in enumerate(cols_matriz):
           if fecha_elegida in col:
@@ -245,8 +254,12 @@ with tab_comparativa:
               "Territorio (Concentrado)",
           ]
 
-          # 2. Excel Matriz Bienestar (Columna B / índice 1 para nombres, y la columna de fecha seleccionada)
-          col_nombre = df_matriz.columns[1] if len(df_matriz.columns) > 1 else df_matriz.columns[0]
+          # 2. Excel Matriz Bienestar
+          col_nombre = (
+              df_matriz.columns[1]
+              if len(df_matriz.columns) > 1
+              else df_matriz.columns[0]
+          )
           df_m = df_matriz[[col_nombre, columna_fecha_matriz]].copy()
           df_m.columns = ["Servidor_Bienestar", "Bienestar (Matriz)"]
           df_m["Servidor_Bienestar"] = (

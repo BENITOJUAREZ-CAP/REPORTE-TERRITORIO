@@ -178,20 +178,50 @@ with tab_comparativa:
         value="Reporte",
     )
 
-    df_matriz = None
+    df_raw = None
     try:
-      df_matriz = conn.read(
-          spreadsheet=SPREADSHEET_URL, worksheet=hoja_matriz.strip(), ttl="0s"
+      # Leer sin encabezado para ubicar la fila exacta de los días y nombres
+      df_raw = conn.read(
+          spreadsheet=SPREADSHEET_URL,
+          worksheet=hoja_matriz.strip(),
+          ttl="0s",
+          header=None,
       )
     except Exception:
       try:
-        df_matriz = conn.read(
-            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
+        df_raw = conn.read(
+            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s", header=None
         )
       except Exception:
         pass
 
-    if df_matriz is not None and not df_matriz.empty:
+    if df_raw is not None and not df_raw.empty:
+      # Buscar automáticamente la fila que contiene las fechas/días (ej. 'oct', 'lunes', 'martes')
+      fila_encabezados = 0
+      for idx, row in df_raw.iterrows():
+        row_str = " ".join(row.dropna().astype(str)).lower()
+        if any(
+            d in row_str
+            for d in [
+                "oct",
+                "sep",
+                "nov",
+                "lunes",
+                "martes",
+                "miércoles",
+                "miercoles",
+                "jueves",
+                "viernes",
+            ]
+        ):
+          fila_encabezados = idx
+          break
+
+      # Extraer los títulos de las columnas de esa fila
+      headers = df_raw.iloc[fila_encabezados].values
+      df_matriz = df_raw.iloc[fila_encabezados + 1 :].copy()
+      df_matriz.columns = [str(h).strip() for h in headers]
+
       fechas_disp = []
       if not df_concentrado.empty and "Fecha" in df_concentrado.columns:
         fechas_disp = sorted(
@@ -206,86 +236,122 @@ with tab_comparativa:
             options=fechas_disp if fechas_disp else ["Sin fechas"],
         )
 
-      cols_matriz = [str(c).strip() for c in df_matriz.columns]
+      cols_matriz = [str(c).strip() for c in df_matriz.columns if str(c).strip() and str(c).lower() != "nan"]
 
-      # Buscar coincidencia del día (ejemplo: '09' o '9' de 2026-10-09)
+      # Intentar detectar automáticamente la columna del día
       partes_fecha = fecha_elegida.split("-") if "-" in fecha_elegida else []
       dia_num = str(int(partes_fecha[2])) if len(partes_fecha) == 3 else ""
 
-      idx_fecha_def = 5 if len(cols_matriz) > 5 else 0
+      idx_fecha_def = 0
       for idx, col in enumerate(cols_matriz):
         col_lower = col.lower()
-        if dia_num and (f" {dia_num} " in f" {col_lower} " or col_lower.startswith(f"{dia_num} ") or col_lower.endswith(f" {dia_num}") or f", {dia_num} " in col_lower):
+        if dia_num and (dia_num in col_lower):
           idx_fecha_def = idx
           break
 
       with col_f2:
-        idx_col_matriz = st.selectbox(
-            "📊 Selecciona/Verifica la columna en Excel Bienestar:",
-            options=range(len(cols_matriz)),
-            format_func=lambda i: f"Columna {i+1}: {cols_matriz[i]}",
-            index=idx_fecha_def,
+        col_elegida_matriz = st.selectbox(
+            "📊 Selecciona el Día en Excel Bienestar:",
+            options=cols_matriz,
+            index=min(idx_fecha_def, len(cols_matriz) - 1),
         )
 
       if st.button("🚀 Comparar Servidores de la Nación", type="primary"):
         try:
+          # 1. Concentrado de Territorio
           df_c = df_concentrado.copy()
-          df_c["Servidor_Original"] = df_c["Personal de Bienestar"].astype(str).str.strip()
-          df_c["Key_Match"] = df_c["Servidor_Original"].apply(normalizar_palabras_nombre)
+          df_c["Servidor_Original"] = (
+              df_c["Personal de Bienestar"].astype(str).str.strip()
+          )
+          df_c["Key_Match"] = df_c["Servidor_Original"].apply(
+              normalizar_palabras_nombre
+          )
           df_c["Visitas Efectivas"] = pd.to_numeric(
               df_c["Visitas Efectivas"], errors="coerce"
           ).fillna(0)
 
           df_c_dia = df_c[df_c["Fecha"] == fecha_elegida]
           df_c_grouped = (
-              df_c_dia.groupby(["Key_Match", "Servidor_Original"])["Visitas Efectivas"]
+              df_c_dia.groupby(["Key_Match", "Servidor_Original"])[
+                  "Visitas Efectivas"
+              ]
               .sum()
               .reset_index()
           )
-          df_c_grouped.columns = ["Key_Match", "Servidor_Territorio", "Territorio (Concentrado)"]
+          df_c_grouped.columns = [
+              "Key_Match",
+              "Servidor_Territorio",
+              "Territorio (Concentrado)",
+          ]
 
-          idx_servidor = 1 if len(cols_matriz) > 1 else 0
-          df_m = df_matriz.iloc[:, [idx_servidor, idx_col_matriz]].copy()
+          # 2. Excel Matriz Bienestar
+          # Buscar la columna que contiene los nombres (Servidor de la Nación, normalmente Columna B / índice 1)
+          col_nombre_matriz = cols_matriz[0]
+          for c in cols_matriz:
+            if any(
+                k in c.lower()
+                for k in ["servidor", "nombre", "personal", "nación"]
+            ):
+              col_nombre_matriz = c
+              break
+
+          df_m = df_matriz[[col_nombre_matriz, col_elegida_matriz]].copy()
           df_m.columns = ["Servidor_Bienestar", "Bienestar (Matriz)"]
-          df_m["Servidor_Bienestar"] = df_m["Servidor_Bienestar"].astype(str).str.strip()
-          df_m["Key_Match"] = df_m["Servidor_Bienestar"].apply(normalizar_palabras_nombre)
+          df_m["Servidor_Bienestar"] = (
+              df_m["Servidor_Bienestar"].astype(str).str.strip()
+          )
+          df_m["Key_Match"] = df_m["Servidor_Bienestar"].apply(
+              normalizar_palabras_nombre
+          )
           df_m["Bienestar (Matriz)"] = pd.to_numeric(
               df_m["Bienestar (Matriz)"], errors="coerce"
           ).fillna(0)
 
           df_m = df_m[df_m["Key_Match"] != ""]
 
+          # 3. Cruzar reportes
           df_final = pd.merge(
               df_c_grouped, df_m, on="Key_Match", how="outer"
           ).fillna(0)
 
-          df_final["Servidor de la Nación"] = df_final["Servidor_Territorio"].where(
-              df_final["Servidor_Territorio"] != 0, df_final["Servidor_Bienestar"]
-          )
+          df_final["Servidor de la Nación"] = df_final[
+              "Servidor_Territorio"
+          ].where(df_final["Servidor_Territorio"] != 0, df_final["Servidor_Bienestar"])
 
           df_final = df_final[[
               "Servidor de la Nación",
               "Territorio (Concentrado)",
-              "Bienestar (Matriz)"
+              "Bienestar (Matriz)",
           ]].copy()
 
-          df_final["Territorio (Concentrado)"] = df_final["Territorio (Concentrado)"].astype(int)
-          df_final["Bienestar (Matriz)"] = df_final["Bienestar (Matriz)"].astype(int)
+          df_final["Territorio (Concentrado)"] = df_final[
+              "Territorio (Concentrado)"
+          ].astype(int)
+          df_final["Bienestar (Matriz)"] = df_final["Bienestar (Matriz)"].astype(
+              int
+          )
           df_final["Diferencia"] = (
               df_final["Territorio (Concentrado)"]
               - df_final["Bienestar (Matriz)"]
           )
 
-          df_final = df_final.sort_values(by="Servidor de la Nación").reset_index(drop=True)
+          df_final = df_final.sort_values(
+              by="Servidor de la Nación"
+          ).reset_index(drop=True)
 
+          # 4. Mostrar Resultados y Gráficas Lado a Lado
           st.markdown("---")
-          st.markdown(f"### 📈 Comparativa de Visitas Efectivas para el día: **{fecha_elegida}**")
+          st.markdown(
+              f"### 📈 Comparativa de Visitas Efectivas para el día: **{fecha_elegida}**"
+          )
 
           g1, g2 = st.columns(2)
           with g1:
             st.write("#### 📝 1. Excel Territorio (Concentrado)")
             st.bar_chart(
-                df_final.set_index("Servidor de la Nación")["Territorio (Concentrado)"]
+                df_final.set_index("Servidor de la Nación")[
+                    "Territorio (Concentrado)"
+                ]
             )
             st.metric(
                 "Total Territorio",
@@ -293,9 +359,11 @@ with tab_comparativa:
             )
 
           with g2:
-            st.write(f"#### 📄 2. Excel Bienestar ({cols_matriz[idx_col_matriz]})")
+            st.write(f"#### 📄 2. Excel Bienestar ({col_elegida_matriz})")
             st.bar_chart(
-                df_final.set_index("Servidor de la Nación")["Bienestar (Matriz)"]
+                df_final.set_index("Servidor de la Nación")[
+                    "Bienestar (Matriz)"
+                ]
             )
             st.metric(
                 "Total Bienestar", int(df_final["Bienestar (Matriz)"].sum())
@@ -305,6 +373,7 @@ with tab_comparativa:
           st.markdown("### 📋 Tabla Comparativa por Servidor de la Nación")
           st.dataframe(df_final, use_container_width=True)
 
+          # Descarga CSV
           csv_data = df_final.to_csv(index=False).encode("utf-8")
           st.download_button(
               label="📥 Descargar Reporte Comparativo (CSV)",

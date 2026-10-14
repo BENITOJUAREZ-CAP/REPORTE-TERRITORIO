@@ -143,7 +143,11 @@ with tab_form:
             "Visitas Servidores de la Salud": int(visitas_salud),
             "Observaciones": observaciones,
         }])
-        df_act = pd.concat([df_concentrado, nuevo_registro], ignore_index=True)
+        df_act = (
+            pd.concat([df_concentrado, nuevo_registro], ignore_index=True)
+            if not df_concentrado.empty
+            else nuevo_registro
+        )
         try:
           conn.update(
               spreadsheet=SPREADSHEET_URL,
@@ -163,6 +167,8 @@ with tab_tabla:
     st.success("Acceso concedido.")
     if not df_concentrado.empty:
       st.dataframe(df_concentrado, use_container_width=True)
+    else:
+      st.info("Aún no hay registros en el concentrado.")
   elif p_stat:
     st.error("Contraseña incorrecta.")
 
@@ -173,7 +179,6 @@ with tab_comparativa:
   if p_comp == "Monica.1":
     st.success("Acceso concedido.")
 
-    # Lectura directa automática de la primera pestaña (0) sin pedir nombres
     df_matriz = None
     try:
       df_matriz = conn.read(
@@ -183,45 +188,61 @@ with tab_comparativa:
       st.error(f"No se pudo leer la hoja matriz: {err}")
 
     if df_matriz is not None and not df_matriz.empty:
+      # Obtener fechas seguras del concentrado o poner la fecha actual por defecto
       fechas_disp = []
-      if not df_concentrado.empty and "Fecha" in df_concentrado.columns:
+      if (
+          not df_concentrado.empty
+          and "Fecha" in df_concentrado.columns
+          and df_concentrado["Fecha"].notna().any()
+      ):
         fechas_disp = sorted(
-            df_concentrado["Fecha"].dropna().astype(str).str.unique().tolist(),
+            df_concentrado["Fecha"].dropna().astype(str).unique().tolist(),
             reverse=True,
         )
+      else:
+        fechas_disp = [datetime.now(ZoneInfo("America/Mexico_City")).strftime("%Y-%m-%d")]
 
       fecha_elegida = st.selectbox(
           "📅 Selecciona la Fecha a comparar en ambos Exceles:",
-          options=fechas_disp if fechas_disp else ["Sin fechas"],
+          options=fechas_disp,
       )
 
       if st.button("🚀 Generar Comparativa", type="primary"):
         try:
           # 1. Concentrado de Territorio
-          df_c = df_concentrado.copy()
-          df_c["Servidor_Original"] = (
-              df_c["Personal de Bienestar"].astype(str).str.strip()
-          )
-          df_c["Key_Match"] = df_c["Servidor_Original"].apply(
-              normalizar_palabras_nombre
-          )
-          df_c["Visitas Efectivas"] = pd.to_numeric(
-              df_c["Visitas Efectivas"], errors="coerce"
-          ).fillna(0)
+          if not df_concentrado.empty and "Fecha" in df_concentrado.columns:
+            df_c = df_concentrado.copy()
+            df_c["Servidor_Original"] = (
+                df_c["Personal de Bienestar"].astype(str).str.strip()
+            )
+            df_c["Key_Match"] = df_c["Servidor_Original"].apply(
+                normalizar_palabras_nombre
+            )
+            df_c["Visitas Efectivas"] = pd.to_numeric(
+                df_c["Visitas Efectivas"], errors="coerce"
+            ).fillna(0)
 
-          df_c_dia = df_c[df_c["Fecha"] == fecha_elegida]
-          df_c_grouped = (
-              df_c_dia.groupby(["Key_Match", "Servidor_Original"])[
-                  "Visitas Efectivas"
-              ]
-              .sum()
-              .reset_index()
-          )
-          df_c_grouped.columns = [
-              "Key_Match",
-              "Servidor_Territorio",
-              "Territorio (Concentrado)",
-          ]
+            df_c_dia = df_c[df_c["Fecha"] == fecha_elegida]
+            df_c_grouped = (
+                df_c_dia.groupby(["Key_Match", "Servidor_Original"])[
+                    "Visitas Efectivas"
+                ]
+                .sum()
+                .reset_index()
+            )
+            df_c_grouped.columns = [
+                "Key_Match",
+                "Servidor_Territorio",
+                "Territorio (Concentrado)",
+            ]
+          else:
+            df_c_grouped = pd.DataFrame(
+                columns=[
+                    "Key_Match",
+                    "Servidor_Territorio",
+                    "Territorio (Concentrado)",
+                ]
+            )
 
           # 2. Buscar la columna que coincida con la fecha elegida en la tabla de Bienestar
           cols_matriz = [str(c).strip() for c in df_matriz.columns]

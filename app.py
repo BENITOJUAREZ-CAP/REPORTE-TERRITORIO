@@ -1,6 +1,7 @@
 from datetime import date, datetime
-import pandas as pd
+import re
 from zoneinfo import ZoneInfo
+import pandas as pd
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 
@@ -196,10 +197,10 @@ with tab_tabla:
     st.error("❌ Contraseña incorrecta.")
 
 # ---------------------------------------------------------
-# TAB 3: COMPARATIVA DE VISITAS EFECTIVAS (PROTEGIDA)
+# TAB 3: COMPARATIVA DE VISITAS EFECTIVAS POR DÍA (PROTEGIDA)
 # ---------------------------------------------------------
 with tab_comparativa:
-  st.subheader("🔍 Comparativa y Análisis de Visitas Efectivas")
+  st.subheader("🔍 Comparativa de Visitas Efectivas por Día")
 
   password_comp = st.text_input(
       "🔒 Ingrese la contraseña de acceso para la Comparativa:",
@@ -211,75 +212,123 @@ with tab_comparativa:
     st.success("🔓 Acceso concedido a la sección de Comparativa.")
 
     hoja_matriz_input = st.text_input(
-        "Escribe el nombre exacto de la pestaña horizontal:",
+        "Pestaña del reporte matriz horizontal:",
         value="Reporte",
     )
 
-    if st.button("🚀 Ejecutar Comparación y Generar Reporte", type="primary"):
-      df_matriz = None
-      # Intentar leer con la pestaña especificada, y si falla, intentar con la primera hoja por defecto
+    df_matriz = None
+    try:
+      df_matriz = conn.read(
+          spreadsheet=SPREADSHEET_URL,
+          worksheet=hoja_matriz_input.strip(),
+          ttl="0s",
+      )
+    except Exception:
       try:
         df_matriz = conn.read(
-            spreadsheet=SPREADSHEET_URL,
-            worksheet=hoja_matriz_input.strip(),
-            ttl="0s",
+            spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
         )
       except Exception:
-        try:
-          df_matriz = conn.read(
-              spreadsheet=SPREADSHEET_URL, worksheet=0, ttl="0s"
+        pass
+
+    if df_matriz is not None and not df_matriz.empty:
+      # Procesar y normalizar fechas del Concentrado
+      df_c = df_concentrado.copy() if df_concentrado is not None else pd.DataFrame()
+      fechas_disponibles = []
+      if not df_c.empty and "Fecha" in df_c.columns:
+        df_c["Visitas Efectivas"] = pd.to_numeric(
+            df_c["Visitas Efectivas"], errors="coerce"
+        ).fillna(0)
+        df_c["Personal_Clean"] = (
+            df_c["Personal de Bienestar"].astype(str).str.strip().str.upper()
+        )
+        fechas_disponibles = sorted(
+            df_c["Fecha"].dropna().astype(str).str.strip().unique().tolist(),
+            reverse=True,
+        )
+
+      # Identificar columnas de fechas en el segundo Excel (matriz)
+      cols_matriz = list(df_matriz.columns)
+      col_persona_matriz = cols_matriz[1] if len(cols_matriz) > 1 else cols_matriz[0]
+
+      col_fecha_sel, col_matriz_sel = st.columns(2)
+      with col_fecha_sel:
+        fecha_filtro = st.selectbox(
+            "📅 Selecciona el día a comparar (Concentrado):",
+            options=fechas_disponibles if fechas_disponibles else ["Sin fechas"],
+        )
+      with col_matriz_sel:
+        cols_fechas_matriz = [c for c in cols_matriz if c not in [cols_matriz[0], col_persona_matriz, "Dependencia", "Visitas totales", "Visitas del periodo"]]
+        col_columna_matriz = st.selectbox(
+            "📊 Selecciona la columna del Día equivalente (Excel Matriz):",
+            options=cols_fechas_matriz if cols_fechas_matriz else cols_matriz,
+        )
+
+      if st.button("🚀 Comparar Visitas Efectivas del Día", type="primary"):
+        # 1. Filtrar Concentrado por el día seleccionado
+        df_c_dia = df_c[df_c["Fecha"] == fecha_filtro].copy() if not df_c.empty else pd.DataFrame()
+        df_c_grouped = (
+            df_c_dia.groupby("Personal_Clean")["Visitas Efectivas"]
+            .sum()
+            .reset_index()
+        )
+
+        # 2. Filtrar Matriz Horizontal por la columna del día elegida
+        df_m = df_matriz[[col_persona_matriz, col_columna_matriz]].copy()
+        df_m.columns = ["Personal_Clean", "Efectivas_Matriz"]
+        df_m["Personal_Clean"] = (
+            df_m["Personal_Clean"].astype(str).str.strip().str.upper()
+        )
+        df_m["Efectivas_Matriz"] = pd.to_numeric(
+            df_m["Efectivas_Matriz"], errors="coerce"
+        ).fillna(0)
+
+        # 3. Unir ambos datasets
+        df_cruse = pd.merge(
+            df_c_grouped, df_m, on="Personal_Clean", how="outer"
+        ).fillna(0)
+        df_cruse.columns = [
+            "Personal de Bienestar",
+            "Efectivas (Concentrado)",
+            "Efectivas (Matriz)",
+        ]
+        df_cruse["Diferencia"] = (
+            df_cruse["Efectivas (Concentrado)"] - df_cruse["Efectivas (Matriz)"]
+        )
+
+        # 4. Mostrar Gráficas lado a lado
+        st.markdown("---")
+        st.markdown(f"### 📊 Comparativa de Visitas Efectivas para el día: **{fecha_filtro}**")
+
+        g1, g2 = st.columns(2)
+        with g1:
+          st.write("#### 📝 1. Concentrado Diario (Streamlit)")
+          st.bar_chart(
+              df_cruse.set_index("Personal de Bienestar")["Efectivas (Concentrado)"]
           )
-        except Exception as ex2:
-          st.error(
-              "No se pudo leer la hoja de Google Sheets. Asegúrate de que el"
-              " archivo sea público o tenga permisos de lectura compartidos"
-              f" con la cuenta de servicio. Detalle: {ex2}"
+          st.metric("Total Efectivas Concentrado", int(df_cruse["Efectivas (Concentrado)"].sum()))
+
+        with g2:
+          st.write(f"#### 📄 2. Excel Matriz ({col_columna_matriz})")
+          st.bar_chart(
+              df_cruse.set_index("Personal de Bienestar")["Efectivas (Matriz)"]
           )
+          st.metric("Total Efectivas Matriz", int(df_cruse["Efectivas (Matriz)"].sum()))
 
-      if df_matriz is not None and not df_matriz.empty:
-        st.success("¡Datos del reporte horizontal leídos correctamente!")
-        st.write("### 📋 Vista Previa del Reporte Matriz Horizontal")
-        st.dataframe(df_matriz.head(10), use_container_width=True)
+        st.markdown("---")
+        st.markdown("### 📋 Tabla Comparativa Detallada por Persona")
+        st.dataframe(df_cruse, use_container_width=True)
 
-        if df_concentrado is not None and not df_concentrado.empty:
-          st.markdown("---")
-          st.markdown("### 📊 Gráficas y Métricas de Comparación")
-
-          df_c = df_concentrado.copy()
-          df_c["Personal_Clean"] = (
-              df_c["Personal de Bienestar"].astype(str).str.strip().str.upper()
-          )
-          df_c["Visitas Efectivas"] = pd.to_numeric(
-              df_c["Visitas Efectivas"], errors="coerce"
-          ).fillna(0)
-
-          col_m1, col_m2 = st.columns(2)
-          with col_m1:
-            total_efectivas = int(df_c["Visitas Efectivas"].sum())
-            st.metric("Total Visitas Efectivas (Concentrado)", total_efectivas)
-          with col_m2:
-            total_personas = df_c["Personal_Clean"].nunique()
-            st.metric("Total Personal con Capturas", total_personas)
-
-          # Gráfica de Barras
-          df_grafica = (
-              df_c.groupby("Personal_Clean")["Visitas Efectivas"]
-              .sum()
-              .reset_index()
-          )
-          st.write("#### 📈 Visitas Efectivas por Personal de Bienestar")
-          st.bar_chart(df_grafica.set_index("Personal_Clean"))
-
-          # Botón de Descarga
-          csv_comp = df_c.to_csv(index=False).encode("utf-8")
-          st.download_button(
-              label="📥 Descargar Nuevo Excel Comparativo (CSV)",
-              data=csv_comp,
-              file_name=f"REPORTE_COMPARATIVO_{datetime.now().strftime('%Y%m%d')}.csv",
-              mime="text/csv",
-          )
-        else:
-          st.info("El concentrado de reportes diarios aún no tiene registros.")
+        # Botón de Descarga
+        csv_comp = df_cruse.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Descargar Comparativa del Día en Excel / CSV",
+            data=csv_comp,
+            file_name=f"COMPARATIVA_EFECTIVAS_{fecha_filtro}.csv",
+            mime="text/csv",
+        )
+    else:
+      st.info("No se pudieron cargar los datos de la hoja matriz.")
 
   elif password_comp:
     st.error("❌ Contraseña incorrecta.")

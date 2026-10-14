@@ -3,8 +3,6 @@ import pandas as pd
 from zoneinfo import ZoneInfo
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
-import gspread
-from google.oauth2.service_account import Credentials
 
 # Configuración inicial
 st.set_page_config(
@@ -19,28 +17,7 @@ SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1StjBMVIkueBy9sVy5dNh1
 HOJA_PERSONAL = "PERSONAL_DE_BIENESTAR"
 HOJA_CONCENTRADO = "CONCENTRADO_DE_REPORTES_DIARIOS"
 
-SCOPE = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
-
 conn = st.connection("gsheets", type=GSheetsConnection)
-
-
-@st.cache_resource
-def get_gspread_client():
-  try:
-    if "gcp_service_account" in st.secrets:
-      creds_dict = dict(st.secrets["gcp_service_account"])
-      creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPE)
-      gc = gspread.authorize(creds)
-      return gc
-  except Exception as e:
-    st.error(f"Error de autenticación con Google: {e}")
-  return None
-
-
-gc = get_gspread_client()
 
 
 # ---------------------------------------------------------
@@ -233,85 +210,79 @@ with tab_comparativa:
   if password_comp == "Monica.1":
     st.success("🔓 Acceso concedido a la sección de Comparativa.")
 
-    nombres_hojas = ["Reporte"]
-    if gc:
-      try:
-        sh = gc.open_by_url(SPREADSHEET_URL)
-        nombres_hojas = [h.title for h in sh.worksheets()]
-      except Exception:
-        pass
-
-    hoja_matriz = st.selectbox(
-        "Selecciona la pestaña del reporte horizontal:", options=nombres_hojas
+    hoja_matriz_input = st.text_input(
+        "Escribe el nombre exacto de la pestaña horizontal (ej. Reporte):",
+        value="Reporte",
     )
 
-    if st.button(
-        "🚀 Ejecutar Comparación y Generar Reporte", type="primary"
-    ):
+    if st.button("🚀 Ejecutar Comparación y Generar Reporte", type="primary"):
       try:
-        if gc:
-          sh = gc.open_by_url(SPREADSHEET_URL)
-          ws = sh.worksheet(hoja_matriz)
-          datos_matriz = ws.get_all_values()
+        # Lectura directa mediante el conector nativo
+        df_matriz = conn.read(
+            spreadsheet=SPREADSHEET_URL,
+            worksheet=hoja_matriz_input.strip(),
+            ttl="0s",
+        )
 
-          if datos_matriz and len(datos_matriz) > 1:
-            df_matriz = pd.DataFrame(
-                datos_matriz[1:], columns=datos_matriz[0]
+        if df_matriz is not None and not df_matriz.empty:
+          st.success(
+              f"¡Pestaña **'{hoja_matriz_input}'** leída correctamente!"
+          )
+          st.write("### 📋 Vista Previa del Reporte Matriz Horizontal")
+          st.dataframe(df_matriz.head(10), use_container_width=True)
+
+          if df_concentrado is not None and not df_concentrado.empty:
+            st.markdown("---")
+            st.markdown("### 📊 Gráficas y Métricas de Comparación")
+
+            df_c = df_concentrado.copy()
+            df_c["Personal_Clean"] = (
+                df_c["Personal de Bienestar"]
+                .astype(str)
+                .str.strip()
+                .str.upper()
             )
-            st.success(
-                f"¡Pestaña '{hoja_matriz}' leída correctamente mediante"
-                " Google Drive API!"
-            )
-            st.write("### 📋 Vista Previa del Reporte Matriz")
-            st.dataframe(df_matriz.head(10), use_container_width=True)
+            df_c["Visitas Efectivas"] = pd.to_numeric(
+                df_c["Visitas Efectivas"], errors="coerce"
+            ).fillna(0)
 
-            if df_concentrado is not None and not df_concentrado.empty:
-              st.markdown("---")
-              st.markdown("### 📈 Análisis Comparativo y Gráficas")
-
-              df_c = df_concentrado.copy()
-              df_c["Personal_Clean"] = (
-                  df_c["Personal de Bienestar"]
-                  .astype(str)
-                  .str.strip()
-                  .str.upper()
-              )
-              df_c["Visitas Efectivas"] = pd.to_numeric(
-                  df_c["Visitas Efectivas"], errors="coerce"
-              ).fillna(0)
-
+            col_m1, col_m2 = st.columns(2)
+            with col_m1:
               total_efectivas = int(df_c["Visitas Efectivas"].sum())
               st.metric(
-                  "Total General de Visitas Efectivas (Concentrado Diario)",
-                  total_efectivas,
+                  "Total Visitas Efectivas (Concentrado)", total_efectivas
               )
+            with col_m2:
+              total_personas = df_c["Personal_Clean"].nunique()
+              st.metric("Total Personal con Capturas", total_personas)
 
-              df_grafica = (
-                  df_c.groupby("Personal_Clean")["Visitas Efectivas"]
-                  .sum()
-                  .reset_index()
-              )
-              st.bar_chart(df_grafica.set_index("Personal_Clean"))
+            # Gráfica de Barras Comparativa por Personal
+            df_grafica = (
+                df_c.groupby("Personal_Clean")["Visitas Efectivas"]
+                .sum()
+                .reset_index()
+            )
+            st.write("#### 📈 Visitas Efectivas por Personal de Bienestar")
+            st.bar_chart(df_grafica.set_index("Personal_Clean"))
 
-              # Opción de descarga directa
-              csv_comp = df_c.to_csv(index=False).encode("utf-8")
-              st.download_button(
-                  label="📥 Descargar Reporte de Comparación (CSV / Excel)",
-                  data=csv_comp,
-                  file_name="REPORTE_COMPARATIVO_VISITAS.csv",
-                  mime="text/csv",
-              )
-            else:
-              st.info(
-                  "El concentrado de reportes diarios aún no tiene datos"
-                  " registrados."
-              )
+            # Exportar archivo de resultados comparativos
+            csv_comp = df_c.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📥 Descargar Nuevo Excel Comparativo (CSV)",
+                data=csv_comp,
+                file_name=f"REPORTE_COMPARATIVO_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+            )
           else:
-            st.warning("La pestaña elegida no contiene suficientes filas.")
+            st.info("El concentrado de reportes aún no contiene registros.")
         else:
-          st.error("No se pudo conectar con Google Drive API.")
+          st.warning("No se encontraron filas en la pestaña especificada.")
+
       except Exception as e:
-        st.error(f"Error al leer la pestaña con gspread: {e}")
+        st.error(
+            f"Error al leer la pestaña '{hoja_matriz_input}'. Verifica que"
+            f" exista en tu Google Sheets. Detalle: {e}"
+        )
 
   elif password_comp:
     st.error("❌ Contraseña incorrecta.")

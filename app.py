@@ -57,7 +57,7 @@ def obtener_concentrado():
     df = conn.read(
         spreadsheet=SPREADSHEET_URL, worksheet=HOJA_CONCENTRADO, ttl="0s"
     )
-    if df is not None:
+    if df is not None and not df.empty:
       return df
   except Exception:
     pass
@@ -179,7 +179,6 @@ with tab_comparativa:
   if p_comp == "Monica.1":
     st.success("Acceso concedido.")
 
-    # Lectura en bruto sin encabezados predeterminados para controlar la Fila 1 y Columna A
     df_raw = None
     try:
       df_raw = conn.read(
@@ -189,6 +188,7 @@ with tab_comparativa:
       st.error(f"No se pudo leer la hoja matriz: {err}")
 
     if df_raw is not None and not df_raw.empty:
+      # Extracción de fechas 100% segura del concentrado o de los encabezados de Bienestar
       fechas_disp = []
       if (
           not df_concentrado.empty
@@ -196,13 +196,22 @@ with tab_comparativa:
           and df_concentrado["Fecha"].notna().any()
       ):
         fechas_disp = sorted(
-            df_concentrado["Fecha"].dropna().astype(str).str.unique().tolist(),
+            df_concentrado["Fecha"].dropna().astype(str).unique().tolist(),
             reverse=True,
         )
       else:
-        fechas_disp = [
-            datetime.now(ZoneInfo("America/Mexico_City")).strftime("%Y-%m-%d")
-        ]
+        try:
+          fila_fechas_crudas = (
+              df_raw.iloc[0].dropna().astype(str).str.strip().tolist()
+          )
+          fechas_disp = [
+              f[:10] for f in fila_fechas_crudas if len(f) >= 10 and "-" in f
+          ]
+        except Exception:
+          pass
+
+      if not fechas_disp:
+        fechas_disp = ["2026-10-09", "2026-10-10", "2026-10-11", "2026-10-12", "2026-10-13", "2026-10-14"]
 
       fecha_elegida = st.selectbox(
           "📅 Selecciona la Fecha a comparar en ambos Exceles:",
@@ -211,7 +220,7 @@ with tab_comparativa:
 
       if st.button("🚀 Generar Comparativa", type="primary"):
         try:
-          # 1. Concentrado de Territorio
+          # 1. Concentrado de Territorio seguro
           if not df_concentrado.empty and "Fecha" in df_concentrado.columns:
             df_c = df_concentrado.copy()
             df_c["Servidor_Original"] = (
@@ -246,7 +255,7 @@ with tab_comparativa:
                 ]
             )
 
-          # 2. Buscar la fecha exacta en la Fila 1 (fila 0 en Python)
+          # 2. Buscar la fecha exacta en la Fila 1 (índice 0)
           fila_fechas = df_raw.iloc[0].astype(str).str.strip().tolist()
           col_idx_encontrada = None
           for idx, val in enumerate(fila_fechas):
@@ -256,8 +265,8 @@ with tab_comparativa:
 
           if col_idx_encontrada is None:
             st.error(
-                f"❌ No se encontró la fecha '{fecha_elegida}' en la Fila 1 del"
-                f" Excel de Bienestar. Valores en Fila 1: {fila_fechas[:6]}"
+                f"❌ No se encontró la columna para la fecha '{fecha_elegida}' en"
+                f" la Fila 1 del Excel de Bienestar."
             )
           else:
             # Extraer nombres de la Columna A (índice 0) y valores de la columna de la fecha

@@ -210,20 +210,37 @@ with tab_comparativa:
   if password_comp == "Monica.1":
     st.success("🔓 Acceso concedido a la sección de Comparativa.")
 
-    hoja_matriz = st.text_input(
-        "Nombre exacto de la pestaña del reporte horizontal:",
-        value="Reporte",
+    # Conectar mediante gspread para obtener los nombres reales de las pestañas
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    nombres_hojas = ["Reporte"]
+    try:
+      if "gcp_service_account" in st.secrets:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        creds = Credentials.from_service_account_info(
+            creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_url(SPREADSHEET_URL)
+        nombres_hojas = [h.title for h in sh.worksheets()]
+    except Exception:
+      pass
+
+    hoja_matriz = st.selectbox(
+        "Selecciona la pestaña del reporte horizontal:", options=nombres_hojas
     )
 
     if st.button("🚀 Ejecutar Análisis y Visualización", type="primary"):
       try:
-        # Intentar leer la hoja con manejo de errores detallado
         df_matriz = conn.read(
             spreadsheet=SPREADSHEET_URL, worksheet=hoja_matriz, ttl="0s"
         )
 
         if df_matriz is not None and not df_matriz.empty:
-          st.success("¡Datos del reporte horizontal leídos con éxito!")
+          st.success(
+              f"¡Datos de la pestaña '{hoja_matriz}' leídos con éxito!"
+          )
           st.write("### 📋 Vista Previa del Reporte Matriz")
           st.dataframe(df_matriz.head(10), use_container_width=True)
 
@@ -246,7 +263,6 @@ with tab_comparativa:
                 total_efectivas,
             )
 
-            # Gráfica de barras por personal
             df_grafica = (
                 df_c.groupby("Personal_Clean")["Visitas Efectivas"]
                 .sum()
@@ -258,14 +274,10 @@ with tab_comparativa:
                 "El concentrado de reportes diarios está vacío actualmente."
             )
         else:
-          st.warning(
-              f"La pestaña '{hoja_matriz}' parece estar vacía o no se"
-              " reconoció correctamente."
-          )
+          st.warning(f"La pestaña '{hoja_matriz}' está vacía.")
       except Exception as e:
         st.error(
-            f"No se pudo leer la pestaña '{hoja_matriz}'. Verifica que el"
-            f" nombre esté bien escrito en Google Sheets. Detalle: {e}"
+            f"No se pudo leer la pestaña '{hoja_matriz}'. Detalle del error: {e}"
         )
 
   elif password_comp:

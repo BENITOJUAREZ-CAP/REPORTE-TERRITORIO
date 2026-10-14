@@ -21,6 +21,19 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 
 # ---------------------------------------------------------
+# Función para normalizar nombres ignorando el orden
+# ---------------------------------------------------------
+def normalizar_palabras_nombre(nombre_str):
+  """Convierte un nombre en un conjunto de palabras clave ordenadas para comparar 'APELLIDOS NOMBRES' con 'NOMBRES APELLIDOS'."""
+  if not nombre_str or pd.isna(nombre_str):
+    return ""
+  palabras = str(nombre_str).upper().strip().split()
+  # Filtramos palabras muy cortas o conectores como 'DE', 'DEL', 'LA'
+  palabras_filtradas = [p for p in palabras if p not in ["DE", "DEL", "LA", "LAS", "LOS", "Y"]]
+  return " ".join(sorted(palabras_filtradas))
+
+
+# ---------------------------------------------------------
 # Cargar Personal
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
@@ -235,53 +248,63 @@ with tab_comparativa:
           "🚀 Comparar Servidores de la Nación", type="primary"
       ):
         try:
-          # 1. Filtrar Concentrado de Territorio
+          # 1. Concentrado de Territorio (APELLIDOS NOMBRES)
           df_c = df_concentrado.copy()
-          df_c["Servidor"] = (
-              df_c["Personal de Bienestar"].astype(str).str.strip().str.upper()
-          )
+          df_c["Servidor_Original"] = df_c["Personal de Bienestar"].astype(str).str.strip()
+          df_c["Key_Match"] = df_c["Servidor_Original"].apply(normalizar_palabras_nombre)
           df_c["Visitas Efectivas"] = pd.to_numeric(
               df_c["Visitas Efectivas"], errors="coerce"
           ).fillna(0)
 
           df_c_dia = df_c[df_c["Fecha"] == fecha_elegida]
           df_c_grouped = (
-              df_c_dia.groupby("Servidor")["Visitas Efectivas"]
+              df_c_dia.groupby(["Key_Match", "Servidor_Original"])["Visitas Efectivas"]
               .sum()
               .reset_index()
           )
-          df_c_grouped.columns = ["Servidor", "Territorio (Concentrado)"]
+          df_c_grouped.columns = ["Key_Match", "Servidor_Territorio", "Territorio (Concentrado)"]
 
-          # 2. Filtrar Excel Matriz (Bienestar) por índice numérico seguro
-          # Tomar Columna B (índice 1) para Servidores de la Nación y la columna elegida para los valores
+          # 2. Excel Matriz Bienestar (NOMBRES APELLIDOS)
           idx_servidor = 1 if len(cols_matriz) > 1 else 0
           df_m = df_matriz.iloc[:, [idx_servidor, idx_col_matriz]].copy()
-          df_m.columns = ["Servidor", "Bienestar (Matriz)"]
-          df_m["Servidor"] = (
-              df_m["Servidor"].astype(str).str.strip().str.upper()
-          )
+          df_m.columns = ["Servidor_Bienestar", "Bienestar (Matriz)"]
+          df_m["Servidor_Bienestar"] = df_m["Servidor_Bienestar"].astype(str).str.strip()
+          df_m["Key_Match"] = df_m["Servidor_Bienestar"].apply(normalizar_palabras_nombre)
           df_m["Bienestar (Matriz)"] = pd.to_numeric(
               df_m["Bienestar (Matriz)"], errors="coerce"
           ).fillna(0)
 
-          # Excluir encabezados repetidos o nulos
-          df_m = df_m[~df_m["Servidor"].isin(["NAN", "NONE", "", "SERVIDOR DE LA NACIÓN"])]
+          # Filtrar filas vacías
+          df_m = df_m[df_m["Key_Match"] != ""]
 
-          # 3. Cruzar reportes
+          # 3. Cruzar ambos DataFrames mediante la clave de palabras ("Key_Match")
           df_final = pd.merge(
-              df_c_grouped, df_m, on="Servidor", how="outer"
+              df_c_grouped, df_m, on="Key_Match", how="outer"
           ).fillna(0)
-          df_final.columns = [
+
+          # Definir el nombre a mostrar (si existe en Territorio, usarlo; de lo contrario usar el de Bienestar)
+          df_final["Servidor de la Nación"] = df_final["Servidor_Territorio"].where(
+              df_final["Servidor_Territorio"] != 0, df_final["Servidor_Bienestar"]
+          )
+
+          # Seleccionar columnas limpias
+          df_final = df_final[[
               "Servidor de la Nación",
               "Territorio (Concentrado)",
-              "Bienestar (Matriz)",
-          ]
+              "Bienestar (Matriz)"
+          ]].copy()
+
+          df_final["Territorio (Concentrado)"] = df_final["Territorio (Concentrado)"].astype(int)
+          df_final["Bienestar (Matriz)"] = df_final["Bienestar (Matriz)"].astype(int)
           df_final["Diferencia"] = (
               df_final["Territorio (Concentrado)"]
               - df_final["Bienestar (Matriz)"]
           )
 
-          # 4. Presentar Resultados y Gráficas
+          # Ordenar por nombre
+          df_final = df_final.sort_values(by="Servidor de la Nación").reset_index(drop=True)
+
+          # 4. Mostrar Resultados y Gráficas
           st.markdown("---")
           st.markdown(
               f"### 📈 Comparativa de Visitas Efectivas para el día: **{fecha_elegida}**"
